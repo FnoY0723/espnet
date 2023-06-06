@@ -545,7 +545,7 @@ def train(args):
         )
     assert isinstance(model, ASRInterface)
     total_subsampling_factor = model.get_total_subsampling_factor()
-
+    print(model)
     logging.info(
         " Total parameter of the model = "
         + str(sum(p.numel() for p in model.parameters()))

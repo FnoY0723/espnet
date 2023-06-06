@@ -16,7 +16,7 @@ encoder_conf:
     activation_type: swish
     macaron_style: true
     use_cnn_module: true
-    cnn_module_kernel: 15
+    cnn_module_kernel: 31
 
 # decoder related
 decoder: transformer
@@ -37,12 +37,12 @@ model_conf:
 
 # minibatch related
 batch_type: numel
-batch_bins: 4000000
+batch_bins: 20000000
 
 # optimization related
 accum_grad: 4
 grad_clip: 5
-max_epoch: 50
+max_epoch: 70
 val_scheduler_criterion:
     - valid
     - acc

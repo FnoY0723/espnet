@@ -50,6 +50,28 @@ def get_parser(parser=None, required=True):
         type=int,
         help="Number of GPUs. If not given, use all visible devices",
     )
+
+    parser.add_argument(
+        "--uma",
+        default=None,
+        type=str,
+        choices=["nouma","sigmode","sigmodemh","sigmax","sigmodeov"],
+        help="Ctc attention",
+    )
+    parser.add_argument(
+        "--uma_n",
+        default=1,
+        type=int,
+        help="Number of ctc attention heads / convolution kernals",
+    )
+    parser.add_argument(
+        "--uma_usedecoder",
+        default=0,
+        type=int,
+        choices=[0,1],
+        help="Use decoder after ctc attention",
+    )
+
     parser.add_argument(
         "--use-ddp",
         default=False,

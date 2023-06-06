@@ -6,7 +6,6 @@ import torch
 from packaging.version import parse as V
 from typeguard import check_argument_types
 
-from espnet2.asr.uma import UMA
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
@@ -35,9 +34,7 @@ else:
         yield
 
 
-class ESPnetASRModel(AbsESPnetModel):
-    """CTC-attention hybrid Encoder-Decoder model"""
-
+class UAMASRModel(AbsESPnetModel):
     def __init__(
         self,
         vocab_size: int,
@@ -53,6 +50,7 @@ class ESPnetASRModel(AbsESPnetModel):
         joint_network: Optional[torch.nn.Module],
         aux_ctc: dict = None,
         ctc_weight: float = 0.5,
+        enc_ctc_weight: float = 0.3,
         interctc_weight: float = 0.0,
         ignore_id: int = -1,
         lsm_weight: float = 0.0,
@@ -89,6 +87,8 @@ class ESPnetASRModel(AbsESPnetModel):
             self.eos = token_list.index(sym_eos)
         else:
             self.eos = vocab_size - 1
+        
+        self.enc_ctc_weight = enc_ctc_weight
         self.vocab_size = vocab_size
         self.ignore_id = ignore_id
         self.ctc_weight = ctc_weight
@@ -100,8 +100,8 @@ class ESPnetASRModel(AbsESPnetModel):
         self.specaug = specaug
         self.normalize = normalize
         self.preencoder = preencoder
-        self.postencoder = postencoder
         self.encoder = encoder
+        self.postencoder = postencoder
 
         if not hasattr(self.encoder, "interctc_use_conditioning"):
             self.encoder.interctc_use_conditioning = False
@@ -161,13 +161,13 @@ class ESPnetASRModel(AbsESPnetModel):
             # self.decoder parameters were never used and PyTorch complained
             # and threw an Exception in the multi-GPU experiment.
             # thanks Jeff Farris for pointing out the issue.
-            if ctc_weight < 1.0:
-                assert (
-                    decoder is not None
-                ), "decoder should not be None when attention is used"
-            else:
-                decoder = None
-                logging.warning("Set decoder to none as ctc_weight==1.0")
+            # if ctc_weight < 1.0:
+            #     assert (
+            #         decoder is not None
+            #     ), "decoder should not be None when attention is used"
+            # else:
+            #     decoder = None
+            #     logging.warning("Set decoder to none as ctc_weight==1.0")
 
             self.decoder = decoder
 
@@ -187,8 +187,6 @@ class ESPnetASRModel(AbsESPnetModel):
             self.ctc = None
         else:
             self.ctc = ctc
-        
-        # self.uma = UMA(256, 256)
 
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
 
@@ -213,6 +211,7 @@ class ESPnetASRModel(AbsESPnetModel):
         **kwargs,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
         """Frontend + Encoder + Decoder + Calc loss
+
         Args:
             speech: (Batch, Length, ...)
             speech_lengths: (Batch, )
@@ -220,6 +219,8 @@ class ESPnetASRModel(AbsESPnetModel):
             text_lengths: (Batch,)
             kwargs: "utt_id" is among the input.
         """
+        # print("")
+        # print("Speech: ", speech.shape)
         assert text_lengths.dim() == 1, text_lengths.shape
         # Check that batch_size is unified
         assert (
@@ -237,27 +238,49 @@ class ESPnetASRModel(AbsESPnetModel):
 
         # 1. Encoder
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
-        # encoder_out, encoder_out_lens = self.uma(encoder_out, encoder_out_lens)
-
+        # print("encoder_out: ", encoder_out.shape)
         intermediate_outs = None
         if isinstance(encoder_out, tuple):
             intermediate_outs = encoder_out[1]
             encoder_out = encoder_out[0]
 
-        loss_att, acc_att, cer_att, wer_att = None, None, None, None
+        loss_ctc_enc, cer_ctc_enc = None, None
         loss_ctc, cer_ctc = None, None
         loss_transducer, cer_transducer, wer_transducer = None, None, None
         stats = dict()
 
+        if self.enc_ctc_weight!=0.0:
+            loss_ctc_enc, cer_ctc_enc = self._calc_ctc_loss(
+                    encoder_out, encoder_out_lens, text, text_lengths
+                )
+            stats["loss_ctc_enc"] = loss_ctc_enc.detach() if loss_ctc_enc is not None else None
+            stats["cer_ctc_enc"] = cer_ctc_enc
+
+        # 2. Decoder
+        decoder_out, decoder_out_lens = self.decoder(encoder_out, encoder_out_lens, text, text_lengths)
+        # print("decoder_out: ", decoder_out.shape)
+        
+
+        # loss_att, acc_att, cer_att, wer_att = None, None, None, None
+        # loss_ctc, cer_ctc = None, None
+        # loss_transducer, cer_transducer, wer_transducer = None, None, None
+        # stats = dict()
+
         # 1. CTC branch
         if self.ctc_weight != 0.0:
             loss_ctc, cer_ctc = self._calc_ctc_loss(
-                encoder_out, encoder_out_lens, text, text_lengths
+                decoder_out, decoder_out_lens, text, text_lengths
             )
 
             # Collect CTC branch stats
             stats["loss_ctc"] = loss_ctc.detach() if loss_ctc is not None else None
             stats["cer_ctc"] = cer_ctc
+            stats["cer"] = cer_ctc
+
+            if self.enc_ctc_weight==0.0:
+                loss = loss_ctc
+            else:
+                loss = self.enc_ctc_weight * loss_ctc_enc + (1 - self.enc_ctc_weight) * loss_ctc
 
         # Intermediate CTC (optional)
         loss_interctc = 0.0
@@ -337,18 +360,18 @@ class ESPnetASRModel(AbsESPnetModel):
                 )
 
             # 3. CTC-Att loss definition
-            if self.ctc_weight == 0.0:
-                loss = loss_att
-            elif self.ctc_weight == 1.0:
-                loss = loss_ctc
-            else:
-                loss = self.ctc_weight * loss_ctc + (1 - self.ctc_weight) * loss_att
+            # if self.ctc_weight == 0.0:
+            #     loss = loss_att
+            # elif self.ctc_weight == 1.0:
+            #     loss = loss_ctc
+            # else:
+            #     loss = self.ctc_weight * loss_ctc + (1 - self.ctc_weight) * loss_att
 
-            # Collect Attn branch stats
-            stats["loss_att"] = loss_att.detach() if loss_att is not None else None
-            stats["acc"] = acc_att
-            stats["cer"] = cer_att
-            stats["wer"] = wer_att
+            # # Collect Attn branch stats
+            # stats["loss_att"] = loss_att.detach() if loss_att is not None else None
+            # stats["acc"] = acc_att
+            # stats["cer"] = cer_att
+            # stats["wer"] = wer_att
 
         # Collect total loss stats
         stats["loss"] = loss.detach()
@@ -372,6 +395,7 @@ class ESPnetASRModel(AbsESPnetModel):
         self, speech: torch.Tensor, speech_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Frontend + Encoder. Note that this method is used by asr_inference.py
+
         Args:
             speech: (Batch, Length, ...)
             speech_lengths: (Batch, )
@@ -406,11 +430,13 @@ class ESPnetASRModel(AbsESPnetModel):
             intermediate_outs = encoder_out[1]
             encoder_out = encoder_out[0]
 
+        # print("transformer encoder_out: ", encoder_out.shape)
         # Post-encoder, e.g. NLU
         if self.postencoder is not None:
             encoder_out, encoder_out_lens = self.postencoder(
                 encoder_out, encoder_out_lens
             )
+        # print("postencoder_out: ", encoder_out.shape)
 
         assert encoder_out.size(0) == speech.size(0), (
             encoder_out.size(),
@@ -457,7 +483,9 @@ class ESPnetASRModel(AbsESPnetModel):
         ys_pad_lens: torch.Tensor,
     ) -> torch.Tensor:
         """Compute negative log likelihood(nll) from transformer-decoder
+
         Normally, this function is called in batchify_nll.
+
         Args:
             encoder_out: (Batch, Length, Dim)
             encoder_out_lens: (Batch,)
@@ -494,6 +522,7 @@ class ESPnetASRModel(AbsESPnetModel):
         batch_size: int = 100,
     ):
         """Compute negative log likelihood(nll) from transformer-decoder
+
         To avoid OOM, this fuction seperate the input into batches.
         Then call nll for each batch and combine and return results.
         Args:
@@ -597,14 +626,17 @@ class ESPnetASRModel(AbsESPnetModel):
         labels: torch.Tensor,
     ):
         """Compute Transducer loss.
+
         Args:
             encoder_out: Encoder output sequences. (B, T, D_enc)
             encoder_out_lens: Encoder output sequences lengths. (B,)
             labels: Label ID sequences. (B, L)
+
         Return:
             loss_transducer: Transducer loss value.
             cer_transducer: Character error rate for Transducer.
             wer_transducer: Word Error Rate for Transducer.
+
         """
         decoder_in, target, t_len, u_len = get_transducer_task_io(
             labels,

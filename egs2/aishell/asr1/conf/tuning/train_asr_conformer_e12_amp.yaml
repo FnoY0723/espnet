@@ -37,8 +37,10 @@ model_conf:
     length_normalized_loss: false
 
 # minibatch related
-batch_type: numel
-batch_bins: 25000000
+# batch_type: numel
+# batch_bins: 25000000
+batch_type: folded
+batch_size: 64
 
 # optimization related
 accum_grad: 1

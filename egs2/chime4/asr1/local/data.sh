@@ -64,10 +64,10 @@ if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     fi
 
     # beamforming for multich
-    local/run_beamform_2ch_track.sh --cmd "${train_cmd}" --nj 20 \
-	    ${CHIME4}/data/audio/16kHz/isolated_2ch_track enhan/beamformit_2mics
-    local/run_beamform_6ch_track.sh --cmd "${train_cmd}" --nj 20 \
-	    ${CHIME4}/data/audio/16kHz/isolated_6ch_track enhan/beamformit_5mics
+    # local/run_beamform_2ch_track.sh --cmd "${train_cmd}" --nj 20 \
+	#     ${CHIME4}/data/audio/16kHz/isolated_2ch_track enhan/beamformit_2mics
+    # local/run_beamform_6ch_track.sh --cmd "${train_cmd}" --nj 20 \
+	#     ${CHIME4}/data/audio/16kHz/isolated_6ch_track enhan/beamformit_5mics
 
     # preparation for chime4 data
     local/real_noisy_chime4_data_prep.sh ${CHIME4}
@@ -78,12 +78,12 @@ if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     local/simu_enhan_chime4_data_prep.sh isolated_1ch_track ${CHIME4}/data/audio/16kHz/isolated_1ch_track
 
     # test data for 2ch track
-    local/real_enhan_chime4_data_prep.sh beamformit_2mics ${PWD}/enhan/beamformit_2mics
-    local/simu_enhan_chime4_data_prep.sh beamformit_2mics ${PWD}/enhan/beamformit_2mics
+    # local/real_enhan_chime4_data_prep.sh beamformit_2mics ${PWD}/enhan/beamformit_2mics
+    # local/simu_enhan_chime4_data_prep.sh beamformit_2mics ${PWD}/enhan/beamformit_2mics
 
-    # test data for 6ch track
-    local/real_enhan_chime4_data_prep.sh beamformit_5mics ${PWD}/enhan/beamformit_5mics
-    local/simu_enhan_chime4_data_prep.sh beamformit_5mics ${PWD}/enhan/beamformit_5mics
+    # # test data for 6ch track
+    # local/real_enhan_chime4_data_prep.sh beamformit_5mics ${PWD}/enhan/beamformit_5mics
+    # local/simu_enhan_chime4_data_prep.sh beamformit_5mics ${PWD}/enhan/beamformit_5mics
 
     # Additionally use WSJ clean data. Otherwise the encoder decoder is not well trained
     local/wsj_data_prep.sh ${WSJ0}/??-{?,??}.? ${WSJ1}/??-{?,??}.?

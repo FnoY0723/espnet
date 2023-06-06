@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
+CUDA_VISIBLE_DEVICES="3"
 set -e
 set -u
 set -o pipefail
@@ -9,24 +10,26 @@ train_set=tr05_multi_noisy_si284 # tr05_multi_noisy (original training data) or 
 valid_set=dt05_multi_isolated_1ch_track
 test_sets="\
 dt05_real_isolated_1ch_track dt05_simu_isolated_1ch_track et05_real_isolated_1ch_track et05_simu_isolated_1ch_track \
-dt05_real_beamformit_2mics dt05_simu_beamformit_2mics et05_real_beamformit_2mics et05_simu_beamformit_2mics \
-dt05_real_beamformit_5mics dt05_simu_beamformit_5mics et05_real_beamformit_5mics et05_simu_beamformit_5mics \
 "
-
-asr_config=conf/train_asr_e_branchformer.yaml
-inference_config=conf/decode_asr.yaml
+# dt05_real_beamformit_2mics dt05_simu_beamformit_2mics et05_real_beamformit_2mics et05_simu_beamformit_2mics \
+# dt05_real_beamformit_5mics dt05_simu_beamformit_5mics et05_real_beamformit_5mics et05_simu_beamformit_5mics \
+asr_config=conf/train_asr_transformer.yaml
+inference_config=conf/decode_asr_transformer.yaml
 lm_config=conf/train_lm_transformer.yaml
 
 speed_perturb_factors="0.9 1.0 1.1"
 
+use_lm=false
 use_word_lm=false
 word_vocab_size=65000
+nj=64               # The number of parallel jobs.
+inference_nj=64 
 
 ./asr.sh                                   \
     --lang en \
     --nlsyms_txt data/nlsyms.txt           \
     --token_type char                      \
-    --feats_type raw                       \
+    --feats_type fbank_pitch                       \
     --audio_format flac.ark                \
     --asr_config "${asr_config}"           \
     --inference_config "${inference_config}"     \

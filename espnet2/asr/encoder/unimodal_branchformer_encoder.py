@@ -44,6 +44,7 @@ from espnet.nets.pytorch_backend.transformer.subsampling import (
     TooShortUttError,
     check_short_utt,
 )
+from espnet2.asr.uma import UMA
 
 
 class EBranchformerEncoderLayer(torch.nn.Module):
@@ -177,7 +178,7 @@ class EBranchformerEncoderLayer(torch.nn.Module):
         return x, mask
 
 
-class EBranchformerEncoder(AbsEncoder):
+class UnimidalEBranchformerEncoder(AbsEncoder):
     """E-Branchformer encoder module."""
 
     def __init__(
@@ -378,6 +379,13 @@ class EBranchformerEncoder(AbsEncoder):
         )
         self.after_norm = LayerNorm(output_size)
 
+        self.uma = UMA(input_size, output_size)
+
+        # self.linear_sigmoid = torch.nn.Sequential(
+        #     torch.nn.Linear(256, 1),
+        #     torch.nn.Sigmoid(),
+        # )
+
     def output_size(self) -> int:
         return self._output_size
 
@@ -427,4 +435,56 @@ class EBranchformerEncoder(AbsEncoder):
 
         xs_pad = self.after_norm(xs_pad)
         olens = masks.squeeze(1).sum(1)
+
+        xs_pad, olens = self.uma(xs_pad, olens)
+        # ################################################################################################
+        # # unimodal attention
+        # batch, length, _ = xs_pad.size()
+
+        # scalar_importance = self.linear_sigmoid(xs_pad)
+        # # scalar_importance = torch.nn.functional.log_softmax(scalar_importance)
+        # # print("alpha: ", scalar_importance)
+
+        # alpha_h = torch.mul(scalar_importance, xs_pad)
+
+        # # find valleys' index
+        # scalar_before = scalar_importance[:,:-1,:].detach()
+        # scalar_after = scalar_importance[:,1:,:].detach()
+        # scalar_before = torch.nn.functional.pad(scalar_before,(0,0,1,0))
+        # scalar_after = torch.nn.functional.pad(scalar_after,(0,0,0,1))
+
+        # mask = (scalar_importance.lt(scalar_before)) & (scalar_importance.lt(scalar_after))
+        # mask = mask.reshape(scalar_importance.shape[0], -1)
+        # mask[:,0] = True
+        # batch_index = mask.nonzero()[:,0]
+        # valley_index_start = mask.nonzero()[:,1]
+        # mask[:,0] = False
+        # mask[:,-1] = True
+        # valley_index_end = mask.nonzero()[:,1] + 2
+        # valley_index_end = torch.where(valley_index_end > (length) * torch.ones_like(valley_index_end), 
+        #                                (length) * torch.ones_like(valley_index_end), valley_index_end)
+
+        # _,counts = torch.unique(batch_index, return_counts = True)
+        # max_counts = (torch.max(counts)).item()
+
+        # utri_mat1 = torch.tril(torch.ones(max_counts+1,max_counts),-1).to(xs_pad.device)
+        # batch_index_mask = utri_mat1[counts]
+        # batch_index_mask = batch_index_mask.reshape(-1,1)
+        # batch_index_mask = batch_index_mask.nonzero()[:, 0]
+
+        # valleys = torch.zeros(batch * max_counts, 2).type_as(valley_index_start)
+        # valleys[batch_index_mask] = torch.cat((valley_index_start.unsqueeze(1), valley_index_end.unsqueeze(1)),1)
+        # # print(valleys)
+        
+        # # utri_mat = torch.tril(torch.cuda.FloatTensor(length+1,length).fill_(1),-1)
+        # utri_mat = torch.tril(torch.ones(length+1,length),-1).to(xs_pad.device)
+        # output_mask = (utri_mat[valleys[:,1]]-utri_mat[valleys[:,0]]).reshape(batch, max_counts, length)
+        # output_mask = output_mask.detach()
+
+        # xs_pad = torch.bmm(output_mask, alpha_h) / torch.bmm(output_mask, scalar_importance).clamp_(1e-6)
+        # # print(torch.isnan(output).any())
+        
+        # # olens = (olens / olens[0] * xs_pad.shape[1]).type_as(olens)
+        # olens = counts
+        
         return xs_pad, olens, None

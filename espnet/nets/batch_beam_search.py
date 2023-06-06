@@ -322,7 +322,7 @@ class BatchBeamSearch(BeamSearch):
                 )
             )
         # add eos in the final loop to avoid that there are no ended hyps
-        if i == maxlen - 1:
+        if i == maxlen:
             logging.info("adding <eos> in the last position in the loop")
             yseq_eos = torch.cat(
                 (

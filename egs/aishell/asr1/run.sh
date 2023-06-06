@@ -2,7 +2,7 @@
 
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
-
+CUDA_VISIBLE_DEVICES="4"
 . ./path.sh || exit 1;
 . ./cmd.sh || exit 1;
 
@@ -25,6 +25,12 @@ train_config=conf/train.yaml
 lm_config=conf/lm.yaml
 decode_config=conf/decode.yaml
 
+# uma_config
+uma=nouma
+uma_n=
+uma_usedecoder=0
+resume_epoch=0
+
 # rnnlm related
 lm_resume=         # specify a snapshot file to resume LM training
 lmtag=             # tag for managing LMs
@@ -38,7 +44,7 @@ recog_model=model.acc.best # set a model to be used for decoding: 'model.acc.bes
 n_average=10
 
 # data
-data=/export/a05/xna/data
+data=./downloads
 data_url=www.openslr.org/resources/33
 
 # exp tag
@@ -214,6 +220,8 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
         asr_train.py \
         --config ${train_config} \
         --preprocess-conf ${preprocess_config} \
+    --uma ${uma} \
+	--uma_usedecoder ${uma_usedecoder} \
         --ngpu ${ngpu} \
         --backend ${backend} \
         --outdir ${expdir}/results \

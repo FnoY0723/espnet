@@ -38,7 +38,7 @@ scheduler_conf:
 
 # minibatch related
 batch_type: folded
-batch_size: 32
+batch_size: 64
 
 # criterion
 best_model_criterion:

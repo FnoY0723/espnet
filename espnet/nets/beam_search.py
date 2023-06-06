@@ -363,7 +363,7 @@ class BeamSearch(torch.nn.Module):
         """
         # set length bounds
         if maxlenratio == 0:
-            maxlen = x.shape[0]
+            maxlen = x.shape[0]+1
         elif maxlenratio < 0:
             maxlen = -1 * int(maxlenratio)
         else:
@@ -410,9 +410,10 @@ class BeamSearch(torch.nn.Module):
             logging.info(
                 f"{v:6.2f} * {self.weights[k]:3} = {v * self.weights[k]:6.2f} for {k}"
             )
-        logging.info(f"total log probability: {best.score:.2f}")
+        # logging.info(f"total log probability: {best.score:.2f}")
         logging.info(f"normalized log probability: {best.score / len(best.yseq):.2f}")
-        logging.info(f"total number of ended hypotheses: {len(nbest_hyps)}")
+        # logging.info(f"total number of ended hypotheses: {len(nbest_hyps)}")
+        logging.info(f"length of hypotheses: {best.yseq.shape[0]-2}")
         if self.token_list is not None:
             logging.info(
                 "best hypo: "

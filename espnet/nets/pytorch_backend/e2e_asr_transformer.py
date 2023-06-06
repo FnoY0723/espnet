@@ -33,6 +33,7 @@ from espnet.nets.pytorch_backend.transformer.decoder import Decoder
 from espnet.nets.pytorch_backend.transformer.dynamic_conv import DynamicConvolution
 from espnet.nets.pytorch_backend.transformer.dynamic_conv2d import DynamicConvolution2D
 from espnet.nets.pytorch_backend.transformer.encoder import Encoder
+from espnet.nets.pytorch_backend.transformer.uma_decoder import UMA_Decoder
 from espnet.nets.pytorch_backend.transformer.initializer import initialize
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (  # noqa: H301
     LabelSmoothingLoss,
@@ -41,6 +42,7 @@ from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask, target
 from espnet.nets.pytorch_backend.transformer.plot import PlotAttentionReport
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.utils.fill_missing_args import fill_missing_args
+from espnet.nets.pytorch_backend.ctc_attention import SigModeOv,SigMax
 
 
 class E2E(ASRInterface, torch.nn.Module):
@@ -121,6 +123,42 @@ class E2E(ASRInterface, torch.nn.Module):
             ctc_softmax=self.ctc.softmax if args.self_conditioning else None,
             conditioning_layer_dim=odim,
         )
+        # uma = 'nouma'
+        # if uma != 'nouma':
+        if args.uma != 'nouma':    
+            self.uma = args.uma
+            if args.uma_usedecoder == 1:
+                self.uma_usedecoder = True
+            else:
+                self.uma_usedecoder = False
+        else:
+            self.uma = None
+            self.uma_usedecoder = False 
+
+        if self.uma is not None:
+            if self.uma == 'sigmodeov':
+                self.ctc_att = SigModeOv(args.adim)
+            else:
+                self.ctc_att = SigMax(args.adim)
+
+            if self.uma_usedecoder is True:
+                self.uma_decoder = UMA_Decoder(
+                    selfattention_layer_type=args.transformer_encoder_selfattn_layer_type,
+                    attention_dim=args.adim,
+                    attention_heads=args.aheads,
+                    conv_wshare=args.wshare,
+                    conv_kernel_length=args.ldconv_encoder_kernel_length,
+                    conv_usebias=args.ldconv_usebias,
+                    linear_units=args.dunits,
+                    num_blocks=args.dlayers,
+                    dropout_rate=args.dropout_rate,
+                    positional_dropout_rate=args.dropout_rate,
+                    attention_dropout_rate=args.transformer_attn_dropout_rate,
+                    stochastic_depth_rate=args.stochastic_depth_rate,
+                    intermediate_layers=self.intermediate_ctc_layers,
+                    ctc_softmax=self.ctc.softmax if args.self_conditioning else None,
+                    conditioning_layer_dim=odim,
+                )
         if args.mtlalpha < 1:
             self.decoder = Decoder(
                 odim=odim,
@@ -193,6 +231,15 @@ class E2E(ASRInterface, torch.nn.Module):
             hs_pad, hs_mask, hs_intermediates = self.encoder(xs_pad, src_mask)
         else:
             hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
+        
+        if self.uma is not None:
+            hs_len = hs_mask.view(hs_pad.size(0), -1).sum(1)
+            hs_pad, hs_len, score = self.ctc_att(hs_pad, hs_len)
+            hs_mask = make_non_pad_mask(hs_len.tolist()).to(hs_pad.device).unsqueeze(-2)
+            if self.uma_usedecoder is True:
+                uma_feat = hs_pad
+                hs_pad, hs_mask = self.uma_decoder(hs_pad,hs_mask)
+
         self.hs_pad = hs_pad
 
         # 2. forward decoder
@@ -308,6 +355,15 @@ class E2E(ASRInterface, torch.nn.Module):
         :rtype: list
         """
         enc_output = self.encode(x).unsqueeze(0)
+
+        if self.uma is not None:
+            hs_len = enc_output.size(dim=-2)
+            enc_output,hs_len,uma_score = self.ctc_att(enc_output,hs_len)
+            if self.uma_usedecoder:
+                uma_feat = enc_output
+                hs_mask = make_non_pad_mask(hs_len.tolist()).to(enc_output.device).unsqueeze(-2)
+                enc_output,hs_mask,hs_intermediates = self.uma_decoder(enc_output,hs_mask)
+
         if self.mtlalpha == 1.0:
             recog_args.ctc_weight = 1.0
             logging.info("Set to pure CTC decoding mode.")
@@ -322,7 +378,9 @@ class E2E(ASRInterface, torch.nn.Module):
             if recog_args.beam_size > 1:
                 raise NotImplementedError("Pure CTC beam search is not implemented.")
             # TODO(hirofumi0810): Implement beam search
-            return nbest_hyps
+            if self.uma is None:
+                uma_score = torch.Tensor([0])
+            return nbest_hyps,lpz,uma_score
         elif self.mtlalpha > 0 and recog_args.ctc_weight > 0.0:
             lpz = self.ctc.log_softmax(enc_output)
             lpz = lpz.squeeze(0)

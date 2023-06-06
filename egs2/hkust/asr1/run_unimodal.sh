@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
-CUDA_VISIBLE_DEVICES="4"
+CUDA_VISIBLE_DEVICES=4
 set -e
 set -u
 set -o pipefail
@@ -11,19 +11,19 @@ valid_set=train_dev
 test_sets="dev"
 
 
-asr_config=conf/train_asr_transformer.yaml
-inference_config=conf/decode.yaml
+asr_config=conf/train_asr_uma_transformer.yaml
+inference_config=conf/decode_uma.yaml
 
 lm_config=conf/tuning/train_lm_transformer.yaml
 use_lm=false
-expdir=exp_transformer_53
-inference_asr_model=valid.acc.ave_10best.pth
+expdir=exp_umatransformer_18e_58
+inference_asr_model=valid.cer.ave_10best.pth
 
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
 speed_perturb_factors="0.9 1.0 1.1"
 
-./asr.sh                                               \
+./asr_unimodal.sh                                               \
     --nj 64 \
     --inference_nj 64  \
     --ngpu 1 \

@@ -60,7 +60,7 @@ scheduler_conf:
    warmup_steps: 30000
 
 specaug: specaug
-specaug_conf:
+specaug_conf:  
     apply_time_warp: true
     time_warp_window: 5
     time_warp_mode: bicubic

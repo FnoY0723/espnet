@@ -1,35 +1,40 @@
 #!/usr/bin/env bash
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
+CUDA_VISIBLE_DEVICES="5,7"
 set -e
 set -u
 set -o pipefail
 
 train_set=train
-valid_set=dev
+valid_set=dev   
 test_sets="dev test"
 
-asr_config=conf/train_asr_branchformer.yaml
-inference_config=conf/decode_asr_branchformer.yaml
+asr_config=conf/train_asr_conformer.yaml
+inference_config=conf/decode_asr_transformer.yaml
 
 lm_config=conf/train_lm_transformer.yaml
 use_lm=false
 use_wordlm=false
+expdir=exp_conformer_417_64_60
+inference_asr_model=valid.acc.ave_10best.pth
 
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
 speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr.sh \
-    --nj 32 \
-    --inference_nj 32 \
-    --ngpu 4 \
+    --nj 64 \
+    --inference_nj 64 \
+    --ngpu 2 \
     --lang zh \
     --audio_format "flac.ark" \
     --feats_type raw \
     --token_type char \
     --use_lm ${use_lm}                                 \
     --use_word_lm ${use_wordlm}                        \
+    --expdir ${expdir}                                 \
+    --inference_asr_model ${inference_asr_model}       \
     --lm_config "${lm_config}"                         \
     --asr_config "${asr_config}"                       \
     --inference_config "${inference_config}"           \
