@@ -27,6 +27,12 @@ test_spm.model
 *.vim
 *.swp
 *.nfs*
+*.log
+exp*
+chime4
+*.png
+tools
+*.yaml
 
 # recipe related
 egs*/*/*/data*
