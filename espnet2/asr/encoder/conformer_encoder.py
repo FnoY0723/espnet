@@ -364,7 +364,7 @@ class ConformerEncoder(AbsEncoder):
                             x = x + self.conditioning_layer(ctc_out)
                             xs_pad = (x, pos_emb)
                         else:
-                            xs_pad = xs_pad + self.conditioning_layer(ctc_out)
+                            xs_pad = xs_pad + self.conditioning_layer(ctc_out) 
 
         if isinstance(xs_pad, tuple):
             xs_pad = xs_pad[0]

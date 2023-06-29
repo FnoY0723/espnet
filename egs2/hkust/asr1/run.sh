@@ -17,8 +17,9 @@ inference_config=conf/decode.yaml
 lm_config=conf/tuning/train_lm_transformer.yaml
 use_lm=false
 expdir=exp_transformer_53
-inference_asr_model=valid.acc.ave_10best.pth
-
+# inference_asr_model=valid.acc.ave_10best.pth
+# inference_asr_model=valid.acc.ave_10best.pth
+inference_asr_model=valid.cer_ctc.ave_10best.pth
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
 speed_perturb_factors="0.9 1.0 1.1"

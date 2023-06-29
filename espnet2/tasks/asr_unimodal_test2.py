@@ -8,6 +8,7 @@ from typeguard import check_argument_types, check_return_type
 
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
+from espnet2.asr.decoder.unimodal_attention_decoder import UnimodalAttentionDecoder
 from espnet2.asr.decoder.hugging_face_transformers_decoder import (  # noqa: H301
     HuggingFaceTransformersDecoder,
 )
@@ -24,6 +25,9 @@ from espnet2.asr.decoder.transformer_decoder import (
 )
 from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
+from espnet2.asr.encoder.unimodal_attention_encoder_test2 import UnimodalAttentionEncoder
+from espnet2.asr.encoder.unimodal_conformer_encoder import UnimodalConformerEncoder
+from espnet2.asr.encoder.unimodal_branchformer_encoder import UnimidalEBranchformerEncoder
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 from espnet2.asr.encoder.contextual_block_conformer_encoder import (
@@ -32,7 +36,7 @@ from espnet2.asr.encoder.contextual_block_conformer_encoder import (
 from espnet2.asr.encoder.contextual_block_transformer_encoder import (
     ContextualBlockTransformerEncoder,
 )
-from espnet2.asr.encoder.e_branchformer_condition_encoder import EBranchformerEncoder
+from espnet2.asr.encoder.e_branchformer_encoder import EBranchformerEncoder
 from espnet2.asr.encoder.hubert_encoder import (
     FairseqHubertEncoder,
     FairseqHubertPretrainEncoder,
@@ -48,6 +52,7 @@ from espnet2.asr.encoder.vgg_rnn_encoder import VGGRNNEncoder
 from espnet2.asr.encoder.wav2vec2_encoder import FairSeqWav2Vec2Encoder
 from espnet2.asr.encoder.whisper_encoder import OpenAIWhisperEncoder
 from espnet2.asr.espnet_model import ESPnetASRModel
+from espnet2.asr.unimodal_attention_model import UAMASRModel
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.default import DefaultFrontend
 from espnet2.asr.frontend.fused import FusedFrontends
@@ -57,6 +62,7 @@ from espnet2.asr.frontend.windowing import SlidingWindow
 from espnet2.asr.maskctc_model import MaskCTCModel
 from espnet2.asr.pit_espnet_model import ESPnetASRModel as PITESPnetModel
 from espnet2.asr.postencoder.abs_postencoder import AbsPostEncoder
+from espnet2.asr.postencoder.unimodal_attention_postencoder import UnimodalAttentionPostEncoder
 from espnet2.asr.postencoder.hugging_face_transformers_postencoder import (
     HuggingFaceTransformersPostEncoder,
 )
@@ -119,6 +125,7 @@ normalize_choices = ClassChoices(
 model_choices = ClassChoices(
     "model",
     classes=dict(
+        uma_model=UAMASRModel,
         espnet=ESPnetASRModel,
         maskctc=MaskCTCModel,
         pit_espnet=PITESPnetModel,
@@ -139,6 +146,9 @@ preencoder_choices = ClassChoices(
 encoder_choices = ClassChoices(
     "encoder",
     classes=dict(
+        unimodal_attention = UnimodalAttentionEncoder,
+        unimodal_conformer = UnimodalConformerEncoder,
+        unimodal_branchformer = UnimidalEBranchformerEncoder,
         conformer=ConformerEncoder,
         transformer=TransformerEncoder,
         transformer_multispkr=TransformerEncoderMultiSpkr,
@@ -162,6 +172,7 @@ postencoder_choices = ClassChoices(
     name="postencoder",
     classes=dict(
         hugging_face_transformers=HuggingFaceTransformersPostEncoder,
+        unimodal_attention = UnimodalAttentionPostEncoder,
     ),
     type_check=AbsPostEncoder,
     default=None,
@@ -170,6 +181,7 @@ postencoder_choices = ClassChoices(
 decoder_choices = ClassChoices(
     "decoder",
     classes=dict(
+        unimodal_transformer=UnimodalAttentionDecoder,
         transformer=TransformerDecoder,
         lightweight_conv=LightweightConvolutionTransformerDecoder,
         lightweight_conv2d=LightweightConvolution2DTransformerDecoder,
@@ -473,7 +485,7 @@ class ASRTask(AbsTask):
         return retval
 
     @classmethod
-    def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel:
+    def build_model(cls, args: argparse.Namespace) -> UAMASRModel:
         assert check_argument_types()
         if isinstance(args.token_list, str):
             with open(args.token_list, encoding="utf-8") as f:
@@ -586,9 +598,9 @@ class ASRTask(AbsTask):
 
         # 7. Build model
         try:
-            model_class = model_choices.get_class(args.model)
+            model_class = model_choices.get_class("uma_model")
         except AttributeError:
-            model_class = model_choices.get_class("espnet")
+            model_class = model_choices.get_class("uma_model")
         model = model_class(
             vocab_size=vocab_size,
             frontend=frontend,

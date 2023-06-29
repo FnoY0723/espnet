@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
+###
+ # @Author: FnoY 1084585914@qq.com
+ # @Date: 2023-03-28 17:30:10
+ # @LastEditors: FnoY 1084585914@qq.com
+ # @LastEditTime: 2023-06-28 18:24:28
+ # @FilePath: /espnet/egs2/aishell/asr1/run_unimodal.sh
+ # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
-CUDA_VISIBLE_DEVICES=4
+CUDA_VISIBLE_DEVICES=5
 set -e
 set -u
 set -o pipefail
 
 train_set=train
 valid_set=dev
-test_sets="test"
+test_sets="dev test"
 
 asr_config=conf/train_asr_unimodal_conformer.yaml
 inference_config=conf/decode_asr_unimodal_attention.yaml
@@ -25,7 +33,7 @@ speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr_unimodal.sh \
     --nj 64 \
-    --inference_nj 64 \
+    --inference_nj 1 \
     --ngpu 1 \
     --lang zh \
     --audio_format "flac.ark" \

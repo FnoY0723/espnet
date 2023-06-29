@@ -39,7 +39,9 @@ from espnet.nets.scorers.length_bonus import LengthBonus
 from espnet.utils.cli_utils import get_commandline_args
 
 from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import librosa
+from espnet2.main_funcs.calculate_all_attentions import calculate_all_attentions
 
 try:
     from transformers import AutoModelForSeq2SeqLM
@@ -49,9 +51,9 @@ try:
 except ImportError:
     is_transformers_available = False
 
-# enc_out_length = []
-# uma_out_length = []
-# text_length = []
+enc_out_length = []
+uma_out_length = []
+text_length = []
 
 class Speech2Text:
     """Speech2Text class
@@ -113,6 +115,8 @@ class Speech2Text:
 
         quantize_modules = set([getattr(torch.nn, q) for q in quantize_modules])
         quantize_dtype = getattr(torch, quantize_dtype)
+
+        self.enc_ctc_weight = 0.0
 
         # 1. Build ASR model
         scorers = {}
@@ -342,11 +346,16 @@ class Speech2Text:
 
         # b. Forward Encoder
         enc, enclen = self.asr_model.encode(**batch)
-        # enc_out_length.append(enc.size(1))
-        # logging.info("encoder out: " + str(enc.size()))
+        enc_out_length.append(enc.size(1))
+        logging.info("encoder out: " + str(enc.size()))
         # logging.info(str(enc))
 
-        # enc, umalen = self.asr_model.uma(enc, enclen)
+        if self.enc_ctc_weight!=0.0:
+            ys_pred = self.asr_model.ctc.log_softmax(enc)
+            ys_condition = self.linear_transform(ys_pred)
+            enc = enc + ys_condition
+
+        enc, umalen = self.asr_model.uma(enc, enclen)
 
         
         # alpha = scalar_importance.cpu().detach().numpy()[0,:,:]
@@ -356,18 +365,61 @@ class Speech2Text:
         # plt.savefig(f'./inference_images/hyp_{self.k}.png')
         # self.k = self.k+1
 
-        # uma_out_length.append(enc.size(1))
+        uma_out_length.append(enc.size(1))
         # logging.info("uma out: " + str(enc.size()))
         # logging.info(str(enc))
 
-        enc, _ = self.asr_model.decoder(enc, enclen, torch.tensor(0), torch.tensor(0))
-        logging.info("decoder out: " + str(enc.size()))
-        # logging.info(str(enc))
-        
+        # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0))
+        enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
         # Normal ASR
         if isinstance(enc, tuple):
             enc = enc[0]
         assert len(enc) == 1, len(enc)
+        logging.info("decoder out: " + str(enc.size()))
+        # logging.info(str(enc))
+        
+
+
+        # # 1. Forwarding model and gathering all attentions
+        # #    calculate_all_attentions() uses single gpu only.
+        # batch = {"speech": speech, "speech_lengths": lengths, "text":torch.randint(0,1,(1,6)), "text_lengths": torch.randint(1,10,(1,))}
+        # logging.info(str(batch))
+        # att_dict = calculate_all_attentions(self.asr_model, batch)
+
+        # # 2. Plot attentions: This part is slow due to matplotlib
+        # for k, att_list in att_dict.items():
+        #     for att_w in zip(att_list):
+        #         if isinstance(att_w, torch.Tensor):
+        #             att_w = att_w.detach().cpu().numpy()
+
+        #         if att_w.ndim == 2:
+        #             att_w = att_w[None]
+        #         elif att_w.ndim == 4:
+        #             # In multispkr_asr model case, the dimension could be 4.
+        #             att_w = np.concatenate(
+        #                 [att_w[i] for i in range(att_w.shape[0])], axis=0
+        #             )
+        #         elif att_w.ndim > 4 or att_w.ndim == 1:
+        #             raise RuntimeError(f"Must be 2, 3 or 4 dimension: {att_w.ndim}")
+
+        #         w, h = plt.figaspect(1.0 / len(att_w))
+        #         fig = plt.Figure(figsize=(w * 1.3, h * 1.3))
+        #         axes = fig.subplots(1, len(att_w))
+        #         if len(att_w) == 1:
+        #             axes = [axes]
+
+        #         for ax, aw in zip(axes, att_w):
+        #             ax.imshow(aw.astype(np.float32), aspect="auto")
+        #             ax.set_title(f"{k}")
+        #             ax.set_xlabel("Input")
+        #             ax.set_ylabel("Output")
+        #             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        #             ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+                
+        #         fig.savefig((f'./inference_images/hyp_{self.k}.png'))
+        #         self.k = self.k+1
+
 
         # c. Passed the encoder result and the beam search
         results = self._decode_single_sample(enc[0])
@@ -803,11 +855,11 @@ def main(cmd=None):
     kwargs.pop("config", None)
     inference(**kwargs)
 
-    # logging.info("enc_out_length: "+str(enc_out_length))
-    # logging.info(str(sum(enc_out_length)))
-    # logging.info("uma_out_length: "+str(uma_out_length))
-    # logging.info(str(sum(uma_out_length)))
-    # logging.info(str(sum(uma_out_length)/sum(enc_out_length)))
+    logging.info("enc_out_length: "+str(enc_out_length))
+    logging.info(str(sum(enc_out_length)))
+    logging.info("uma_out_length: "+str(uma_out_length))
+    logging.info(str(sum(uma_out_length)))
+    logging.info(str(sum(uma_out_length)/sum(enc_out_length)))
 
 if __name__ == "__main__":
     main()

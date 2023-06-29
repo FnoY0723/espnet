@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
-CUDA_VISIBLE_DEVICES="3"
+CUDA_VISIBLE_DEVICES="6"
 set -e
 set -u
 set -o pipefail

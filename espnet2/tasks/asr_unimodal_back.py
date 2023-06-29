@@ -7,11 +7,8 @@ import torch
 from typeguard import check_argument_types, check_return_type
 
 from espnet2.asr.ctc import CTC
-from espnet2.asr.uma import UMA
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.decoder.unimodal_attention_decoder import UnimodalAttentionDecoder
-from espnet2.asr.decoder.unimodal_conformer_decoder import UnimodalConformerDecoder
-
 from espnet2.asr.decoder.hugging_face_transformers_decoder import (  # noqa: H301
     HuggingFaceTransformersDecoder,
 )
@@ -30,6 +27,7 @@ from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.encoder.unimodal_attention_encoder import UnimodalAttentionEncoder
 from espnet2.asr.encoder.unimodal_conformer_encoder import UnimodalConformerEncoder
+from espnet2.asr.encoder.unimodal_branchformer_encoder import UnimidalEBranchformerEncoder
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 from espnet2.asr.encoder.contextual_block_conformer_encoder import (
@@ -64,6 +62,7 @@ from espnet2.asr.frontend.windowing import SlidingWindow
 from espnet2.asr.maskctc_model import MaskCTCModel
 from espnet2.asr.pit_espnet_model import ESPnetASRModel as PITESPnetModel
 from espnet2.asr.postencoder.abs_postencoder import AbsPostEncoder
+from espnet2.asr.postencoder.unimodal_attention_postencoder import UnimodalAttentionPostEncoder
 from espnet2.asr.postencoder.hugging_face_transformers_postencoder import (
     HuggingFaceTransformersPostEncoder,
 )
@@ -149,6 +148,7 @@ encoder_choices = ClassChoices(
     classes=dict(
         unimodal_attention = UnimodalAttentionEncoder,
         unimodal_conformer = UnimodalConformerEncoder,
+        unimodal_branchformer = UnimidalEBranchformerEncoder,
         conformer=ConformerEncoder,
         transformer=TransformerEncoder,
         transformer_multispkr=TransformerEncoderMultiSpkr,
@@ -172,6 +172,7 @@ postencoder_choices = ClassChoices(
     name="postencoder",
     classes=dict(
         hugging_face_transformers=HuggingFaceTransformersPostEncoder,
+        unimodal_attention = UnimodalAttentionPostEncoder,
     ),
     type_check=AbsPostEncoder,
     default=None,
@@ -181,7 +182,6 @@ decoder_choices = ClassChoices(
     "decoder",
     classes=dict(
         unimodal_transformer=UnimodalAttentionDecoder,
-        unimodal_conformer=UnimodalConformerDecoder,
         transformer=TransformerDecoder,
         lightweight_conv=LightweightConvolutionTransformerDecoder,
         lightweight_conv2d=LightweightConvolution2DTransformerDecoder,
@@ -563,9 +563,6 @@ class ASRTask(AbsTask):
         else:
             postencoder = None
 
-        # UMA
-        uma = UMA(256, 256)
-
         # 5. Decoder
         if getattr(args, "decoder", None) is not None:
             decoder_class = decoder_choices.get_class(args.decoder)
@@ -614,7 +611,6 @@ class ASRTask(AbsTask):
             postencoder=postencoder,
             decoder=decoder,
             ctc=ctc,
-            uma=uma,
             joint_network=joint_network,
             token_list=token_list,
             **args.model_conf,

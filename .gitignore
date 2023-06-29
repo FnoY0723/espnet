@@ -28,6 +28,7 @@ test_spm.model
 *.swp
 *.nfs*
 *.log
+*.scp
 exp*
 chime4
 *.png

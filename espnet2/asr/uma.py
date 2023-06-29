@@ -59,6 +59,7 @@ class UMA(torch.nn.Module):
         # unimodal attention
         # plt.clf()
         # plt.plot(xs_pad.cpu().detach().numpy()[0,:,1], color='black')
+        # print(olens)
         batch, length, _ = xs_pad.size()
 
         scalar_importance = self.linear_sigmoid(xs_pad)
@@ -79,22 +80,20 @@ class UMA(torch.nn.Module):
         scalar_before = torch.nn.functional.pad(scalar_before,(0,0,1,0))
         scalar_after = torch.nn.functional.pad(scalar_after,(0,0,0,1))
 
-        mask = ((scalar_importance.lt(scalar_before)) & (scalar_importance.lt(scalar_after)))
+        mask = (scalar_importance.lt(scalar_before)) & (scalar_importance.lt(scalar_after))
         mask = mask.reshape(scalar_importance.shape[0], -1)
-        # print(mask.shape)
         mask[:,0] = True
         batch_index = mask.nonzero()[:,0]
         valley_index_start = mask.nonzero()[:,1]
         mask[:,0] = False
         mask[:,-1] = True
-        valley_index_end = valley_index_start + 2
+        valley_index_end = mask.nonzero()[:,1] + 2
         valley_index_end = torch.where(valley_index_end > (length) * torch.ones_like(valley_index_end), 
                                        (length) * torch.ones_like(valley_index_end), valley_index_end)
         # print(valley_index_start.shape)
         # print(valley_index_end.shape)
 
         _,counts = torch.unique(batch_index, return_counts = True)
-        # logging.info(str(counts))
         max_counts = (torch.max(counts)).item()
 
         utri_mat1 = torch.tril(torch.ones(max_counts+1,max_counts),-1).to(xs_pad.device)
@@ -111,11 +110,16 @@ class UMA(torch.nn.Module):
         output_mask = (utri_mat[valleys[:,1]]-utri_mat[valleys[:,0]]).reshape(batch, max_counts, length)
         output_mask = output_mask.detach()
 
+        # print(counts)
+        # print(output_mask.shape)
+        # print(alpha_h.shape)
+        # print(scalar_importance.shape)
         xs_pad = torch.bmm(output_mask, alpha_h) / torch.bmm(output_mask, scalar_importance).clamp_(1e-6)
-        # print(torch.isnan(output).any())
-        
-        # olens = (olens / olens[0] * xs_pad.shape[1]).type_as(olens)
-        olens = counts
+
+        # print(xs_pad.size())
+        olens = (olens / olens[0] * xs_pad.shape[1]).type_as(olens)
+        # print(olens)
+        # olens = counts
         
         # return xs_pad, olens, scalar_importance
         return xs_pad, olens

@@ -6,7 +6,6 @@ import torch
 from packaging.version import parse as V
 from typeguard import check_argument_types
 
-from espnet2.asr.uma import UMA
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
@@ -25,8 +24,6 @@ from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (  # noqa: H301
     LabelSmoothingLoss,
 )
-
-from matplotlib import pyplot as plt
 
 if V(torch.__version__) >= V("1.6.0"):
     from torch.cuda.amp import autocast
@@ -50,7 +47,6 @@ class UAMASRModel(AbsESPnetModel):
         postencoder: Optional[AbsPostEncoder],
         decoder: Optional[AbsDecoder],
         ctc: CTC,
-        uma: UMA,
         joint_network: Optional[torch.nn.Module],
         aux_ctc: dict = None,
         ctc_weight: float = 0.5,
@@ -104,8 +100,8 @@ class UAMASRModel(AbsESPnetModel):
         self.specaug = specaug
         self.normalize = normalize
         self.preencoder = preencoder
-        self.postencoder = postencoder
         self.encoder = encoder
+        self.postencoder = postencoder
 
         if not hasattr(self.encoder, "interctc_use_conditioning"):
             self.encoder.interctc_use_conditioning = False
@@ -191,8 +187,6 @@ class UAMASRModel(AbsESPnetModel):
             self.ctc = None
         else:
             self.ctc = ctc
-        
-        self.uma = uma
 
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
 
@@ -225,9 +219,7 @@ class UAMASRModel(AbsESPnetModel):
             text_lengths: (Batch,)
             kwargs: "utt_id" is among the input.
         """
-        # logging.info('')
-        # logging.info("after nonzero: "+str(torch.unique(speech.nonzero()[:,0], return_counts = True)[1]))
-        # logging.info("text length: "+ (str(text_lengths)))
+        # print("")
         # print("Speech: ", speech.shape)
         assert text_lengths.dim() == 1, text_lengths.shape
         # Check that batch_size is unified
@@ -246,8 +238,7 @@ class UAMASRModel(AbsESPnetModel):
 
         # 1. Encoder
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
-        # print("encoder_out_length: ", encoder_out_lens)
-        # print("encoder_out: ", encoder_out)
+        # print("encoder_out: ", encoder_out.shape)
         intermediate_outs = None
         if isinstance(encoder_out, tuple):
             intermediate_outs = encoder_out[1]
@@ -258,29 +249,16 @@ class UAMASRModel(AbsESPnetModel):
         loss_transducer, cer_transducer, wer_transducer = None, None, None
         stats = dict()
 
-        # uma_out, uma_out_lens = self.uma(encoder_out, encoder_out_lens)
-        # if self.enc_ctc_weight!=0.0:
-        #     loss_ctc_enc, cer_ctc_enc = self._calc_ctc_loss(
-        #             uma_out, uma_out_lens, text, text_lengths
-        #         )
-        #     stats["loss_ctc_uma"] = loss_ctc_enc.detach() if loss_ctc_enc is not None else None
-        #     stats["cer_ctc_uma"] = cer_ctc_enc
-
         if self.enc_ctc_weight!=0.0:
             loss_ctc_enc, cer_ctc_enc = self._calc_ctc_loss(
                     encoder_out, encoder_out_lens, text, text_lengths
                 )
             stats["loss_ctc_enc"] = loss_ctc_enc.detach() if loss_ctc_enc is not None else None
             stats["cer_ctc_enc"] = cer_ctc_enc
-        
-        # print("encoder_out_length: ", encoder_out.shape[1])
-        # 3. unimodal attention module
-        uma_out, uma_out_lens = self.uma(encoder_out, encoder_out_lens)
-        # logging.info("uma_out_length: "+ (str(uma_out_lens)))
 
         # 2. Decoder
-        decoder_out, decoder_out_lens = self.decoder(uma_out, uma_out_lens, text, text_lengths)
-        # print("decoder_out: ", decoder_out_lens)
+        decoder_out, decoder_out_lens = self.decoder(encoder_out, encoder_out_lens, text, text_lengths)
+        # print("decoder_out: ", decoder_out.shape)
         
 
         # loss_att, acc_att, cer_att, wer_att = None, None, None, None
@@ -304,8 +282,100 @@ class UAMASRModel(AbsESPnetModel):
             else:
                 loss = self.enc_ctc_weight * loss_ctc_enc + (1 - self.enc_ctc_weight) * loss_ctc
 
+        # Intermediate CTC (optional)
+        loss_interctc = 0.0
+        if self.interctc_weight != 0.0 and intermediate_outs is not None:
+            for layer_idx, intermediate_out in intermediate_outs:
+                # we assume intermediate_out has the same length & padding
+                # as those of encoder_out
+
+                # use auxillary ctc data if specified
+                loss_ic = None
+                if self.aux_ctc is not None:
+                    idx_key = str(layer_idx)
+                    if idx_key in self.aux_ctc:
+                        aux_data_key = self.aux_ctc[idx_key]
+                        aux_data_tensor = kwargs.get(aux_data_key, None)
+                        aux_data_lengths = kwargs.get(aux_data_key + "_lengths", None)
+
+                        if aux_data_tensor is not None and aux_data_lengths is not None:
+                            loss_ic, cer_ic = self._calc_ctc_loss(
+                                intermediate_out,
+                                encoder_out_lens,
+                                aux_data_tensor,
+                                aux_data_lengths,
+                            )
+                        else:
+                            raise Exception(
+                                "Aux. CTC tasks were specified but no data was found"
+                            )
+                if loss_ic is None:
+                    loss_ic, cer_ic = self._calc_ctc_loss(
+                        intermediate_out, encoder_out_lens, text, text_lengths
+                    )
+                loss_interctc = loss_interctc + loss_ic
+
+                # Collect Intermedaite CTC stats
+                stats["loss_interctc_layer{}".format(layer_idx)] = (
+                    loss_ic.detach() if loss_ic is not None else None
+                )
+                stats["cer_interctc_layer{}".format(layer_idx)] = cer_ic
+
+            loss_interctc = loss_interctc / len(intermediate_outs)
+
+            # calculate whole encoder loss
+            loss_ctc = (
+                1 - self.interctc_weight
+            ) * loss_ctc + self.interctc_weight * loss_interctc
+
+        if self.use_transducer_decoder:
+            # 2a. Transducer decoder branch
+            (
+                loss_transducer,
+                cer_transducer,
+                wer_transducer,
+            ) = self._calc_transducer_loss(
+                encoder_out,
+                encoder_out_lens,
+                text,
+            )
+
+            if loss_ctc is not None:
+                loss = loss_transducer + (self.ctc_weight * loss_ctc)
+            else:
+                loss = loss_transducer
+
+            # Collect Transducer branch stats
+            stats["loss_transducer"] = (
+                loss_transducer.detach() if loss_transducer is not None else None
+            )
+            stats["cer_transducer"] = cer_transducer
+            stats["wer_transducer"] = wer_transducer
+
+        else:
+            # 2b. Attention decoder branch
+            if self.ctc_weight != 1.0:
+                loss_att, acc_att, cer_att, wer_att = self._calc_att_loss(
+                    encoder_out, encoder_out_lens, text, text_lengths
+                )
+
+            # 3. CTC-Att loss definition
+            # if self.ctc_weight == 0.0:
+            #     loss = loss_att
+            # elif self.ctc_weight == 1.0:
+            #     loss = loss_ctc
+            # else:
+            #     loss = self.ctc_weight * loss_ctc + (1 - self.ctc_weight) * loss_att
+
+            # # Collect Attn branch stats
+            # stats["loss_att"] = loss_att.detach() if loss_att is not None else None
+            # stats["acc"] = acc_att
+            # stats["cer"] = cer_att
+            # stats["wer"] = wer_att
+
         # Collect total loss stats
         stats["loss"] = loss.detach()
+
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
         loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
         return loss, stats, weight
@@ -346,7 +416,6 @@ class UAMASRModel(AbsESPnetModel):
         if self.preencoder is not None:
             feats, feats_lengths = self.preencoder(feats, feats_lengths)
 
-        # logging.info("feats_length: "+str(feats_lengths))
         # 4. Forward encoder
         # feats: (Batch, Length, Dim)
         # -> encoder_out: (Batch, Length2, Dim2)

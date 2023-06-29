@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
+CUDA_VISIBLE_DEVICES=5
 set -e
 set -u
 set -o pipefail
@@ -13,16 +14,17 @@ asr_config=conf/train_asr_conformer.yaml
 inference_config=conf/decode_asr_rnn.yaml
 
 lm_config=conf/train_lm_transformer.yaml
-use_lm=true
+use_lm=false
 use_wordlm=false
 
+inference_asr_model=valid.cer_ctc.ave_10best.pth
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
 speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr.sh                                               \
     --lang zh                                          \
-    --ngpu 8                                           \
+    --ngpu 1                                           \
     --audio_format wav                                 \
     --feats_type raw                                   \
     --token_type char                                  \

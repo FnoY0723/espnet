@@ -817,6 +817,8 @@ class Trainer:
             if no_forward_run:
                 continue
 
+            # logging.info(str(batch))
+
             # 1. Forwarding model and gathering all attentions
             #    calculate_all_attentions() uses single gpu only.
             att_dict = calculate_all_attentions(model, batch)
@@ -846,6 +848,7 @@ class Trainer:
 
                     for ax, aw in zip(axes, att_w):
                         ax.imshow(aw.astype(np.float32), aspect="auto")
+                        # logging.info(str(aw))
                         ax.set_title(f"{k}_{id_}")
                         ax.set_xlabel("Input")
                         ax.set_ylabel("Output")

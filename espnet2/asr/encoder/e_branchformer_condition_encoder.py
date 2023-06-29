@@ -10,11 +10,12 @@ Reference:
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 from typeguard import check_argument_types
 
+from espnet2.asr.ctc import CTC
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.layers.cgmlp import ConvolutionalGatingMLP
 from espnet2.asr.layers.fastformer import FastSelfAttention
@@ -207,6 +208,7 @@ class EBranchformerEncoder(AbsEncoder):
         linear_units: int = 2048,
         positionwise_layer_type: str = "linear",
         merge_conv_kernel: int = 3,
+        interctc_layer_idx: List[int] = [],
         interctc_use_conditioning: bool = False,
     ):
         assert check_argument_types()
@@ -379,7 +381,11 @@ class EBranchformerEncoder(AbsEncoder):
         )
         self.after_norm = LayerNorm(output_size)
 
+        self.interctc_layer_idx = interctc_layer_idx
+        if len(interctc_layer_idx) > 0:
+            assert 0 < min(interctc_layer_idx) and max(interctc_layer_idx) < num_blocks
         self.interctc_use_conditioning = interctc_use_conditioning
+        self.conditioning_layer = None
 
     def output_size(self) -> int:
         return self._output_size
@@ -389,6 +395,7 @@ class EBranchformerEncoder(AbsEncoder):
         xs_pad: torch.Tensor,
         ilens: torch.Tensor,
         prev_states: torch.Tensor = None,
+        ctc: CTC = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Calculate forward propagation.
 
@@ -423,11 +430,38 @@ class EBranchformerEncoder(AbsEncoder):
         elif self.embed is not None:
             xs_pad = self.embed(xs_pad)
 
-        xs_pad, masks = self.encoders(xs_pad, masks)
+        intermediate_outs = []
+        if len(self.interctc_layer_idx) == 0:
+            xs_pad, masks = self.encoders(xs_pad, masks)
+        else:
+            for layer_idx, encoder_layer in enumerate(self.encoders):
+                xs_pad, masks = encoder_layer(xs_pad, masks)
+
+                if layer_idx + 1 in self.interctc_layer_idx:
+                    encoder_out = xs_pad
+                    if isinstance(encoder_out, tuple):
+                        encoder_out = encoder_out[0]
+
+                    # intermediate outputs are also normalized
+                    encoder_out = self.after_norm(encoder_out)
+
+                    intermediate_outs.append((layer_idx + 1, encoder_out))
+
+                    if self.interctc_use_conditioning:
+                        ctc_out = ctc.softmax(encoder_out)
+
+                        if isinstance(xs_pad, tuple):
+                            x, pos_emb = xs_pad
+                            x = x + self.conditioning_layer(ctc_out)
+                            xs_pad = (x, pos_emb)
+                        else:
+                            xs_pad = xs_pad + self.conditioning_layer(ctc_out)
 
         if isinstance(xs_pad, tuple):
             xs_pad = xs_pad[0]
 
         xs_pad = self.after_norm(xs_pad)
         olens = masks.squeeze(1).sum(1)
+        if len(intermediate_outs) > 0:
+            return (xs_pad, intermediate_outs), olens, None
         return xs_pad, olens, None

@@ -31,6 +31,8 @@ from espnet.nets.pytorch_backend.transformer.subsampling import (
     check_short_utt,
 )
 
+from espnet2.asr.ctc import CTC
+
 
 class UnimodalAttentionDecoder(AbsDecoder):
     """Transformer encoder module.
@@ -137,11 +139,6 @@ class UnimodalAttentionDecoder(AbsDecoder):
         self.interctc_use_conditioning = interctc_use_conditioning
         self.conditioning_layer = None
 
-        # self.linear_sigmoid = torch.nn.Sequential(
-        #     torch.nn.Linear(256, 1),
-        #     torch.nn.Sigmoid(),
-        #     # torch.nn.functional.log_softmax(),
-        # )
 
     def output_size(self) -> int:
         return self._output_size
@@ -152,6 +149,7 @@ class UnimodalAttentionDecoder(AbsDecoder):
         hlens: torch.Tensor,
         ys_in_pad: torch.Tensor,
         ys_in_lens: torch.Tensor,
+        ctc: CTC = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Embed positions in tensor.
 
@@ -162,15 +160,49 @@ class UnimodalAttentionDecoder(AbsDecoder):
         Returns:
             position embedded tensor and mask
         """
+
         masks = (~make_pad_mask(hlens)[:, None, :]).to(hs_pad.device)
 
         hs_pad = self.embed(hs_pad)
 
-        hs_pad, masks = self.encoders(hs_pad, masks)
+
+        intermediate_outs = []
+        if len(self.interctc_layer_idx) == 0:
+            hs_pad, masks = self.encoders(hs_pad, masks)
+        else:
+            for layer_idx, encoder_layer in enumerate(self.encoders):
+                hs_pad, masks = encoder_layer(hs_pad, masks)
+
+                if layer_idx + 1 in self.interctc_layer_idx:
+                    encoder_out = hs_pad
+                    if isinstance(encoder_out, tuple):
+                        encoder_out = encoder_out[0]
+
+                    # intermediate outputs are also normalized
+                    if self.normalize_before:
+                        encoder_out = self.after_norm(encoder_out)
+
+                    intermediate_outs.append((layer_idx + 1, encoder_out))
+
+                    if self.interctc_use_conditioning:
+                        ctc_out = ctc.softmax(encoder_out)
+
+                        if isinstance(hs_pad, tuple):
+                            x, pos_emb = hs_pad
+                            x = x + self.conditioning_layer(ctc_out)
+                            hs_pad = (x, pos_emb)
+                        else:
+                            hs_pad = hs_pad + self.conditioning_layer(ctc_out) 
+
+        if isinstance(hs_pad, tuple):
+            hs_pad = hs_pad[0]
         
         if self.normalize_before:
             hs_pad = self.after_norm(hs_pad)
 
         olens = masks.squeeze(1).sum(1)
+
+        if len(intermediate_outs) > 0:
+            return (hs_pad, intermediate_outs), olens
         
         return hs_pad, olens

@@ -71,15 +71,6 @@ class UMA(torch.nn.Module):
         batch, length, _ = xs_pad.size()
 
         scalar_importance = self.linear_sigmoid(xs_pad)
-        
-        # plt.plot(scalar_importance.cpu().detach().numpy()[0,:,:], color='blue')
-        # plt.savefig(f'./inference_images/hyp_{olens[0]}.png')
-        # k = k+1
-        
-        # score = self.pooling_proj(xs_pad) / self._output_size**0.5 # (batch, T, 1)
-        # scalar_importance = torch.softmax(score, dim=1)
-
-        # print("alpha: ", scalar_importance)
         alpha_h = torch.mul(scalar_importance, xs_pad)
 
         # find valleys' index
@@ -88,22 +79,19 @@ class UMA(torch.nn.Module):
         scalar_before = torch.nn.functional.pad(scalar_before,(0,0,1,0))
         scalar_after = torch.nn.functional.pad(scalar_after,(0,0,0,1))
 
-        mask = ((scalar_importance.lt(scalar_before)) & (scalar_importance.lt(scalar_after)))
+        mask = (scalar_importance.lt(scalar_before)) & (scalar_importance.lt(scalar_after))
         mask = mask.reshape(scalar_importance.shape[0], -1)
-        # print(mask.shape)
         mask[:,0] = True
         batch_index = mask.nonzero()[:,0]
         valley_index_start = mask.nonzero()[:,1]
         mask[:,0] = False
         mask[:,-1] = True
-        valley_index_end = valley_index_start + 2
+        valley_index_end = mask.nonzero()[:,1] + 2
         valley_index_end = torch.where(valley_index_end > (length) * torch.ones_like(valley_index_end), 
                                        (length) * torch.ones_like(valley_index_end), valley_index_end)
-        # print(valley_index_start.shape)
-        # print(valley_index_end.shape)
 
         _,counts = torch.unique(batch_index, return_counts = True)
-        # logging.info(str(counts))
+        # print("counts: ", counts)
         max_counts = (torch.max(counts)).item()
 
         utri_mat1 = torch.tril(torch.ones(max_counts+1,max_counts),-1).to(xs_pad.device)
@@ -113,7 +101,7 @@ class UMA(torch.nn.Module):
 
         valleys = torch.zeros(batch * max_counts, 2).type_as(valley_index_start)
         valleys[batch_index_mask] = torch.cat((valley_index_start.unsqueeze(1), valley_index_end.unsqueeze(1)),1)
-        # logging.info(str(valleys))
+        # print(valleys)
         
         # utri_mat = torch.tril(torch.cuda.FloatTensor(length+1,length).fill_(1),-1)
         utri_mat = torch.tril(torch.ones(length+1,length),-1).to(xs_pad.device)
@@ -367,8 +355,9 @@ class UnimodalAttentionEncoder(AbsEncoder):
         return xs_pad, olens, None
     
 def setup_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    # torch.manual_seed(seed)
+    # torch.cuda.manual_seed_all(seed)
+    torch.random.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
 
 if __name__=="__main__":
