@@ -99,7 +99,8 @@ asr_args=      # Arguments for asr model training, e.g., "--max_epoch 10".
                # Note that it will overwrite args in asr config.
 pretrained_model=              # Pretrained model to load
 ignore_init_mismatch=false      # Ignore initial mismatch
-feats_normalize=global_mvn # Normalizaton layer type.
+# feats_normalize=global_mvn # Normalizaton layer type.
+feats_normalize=utterance_mvn
 num_splits_asr=1           # Number of splitting for lm corpus.
 num_ref=1   # Number of references for training.
             # In supervised learning based speech enhancement / separation, it is equivalent to number of speakers.
@@ -131,7 +132,7 @@ inference_args=   # Arguments for decoding, e.g., "--lm_weight 0.1".
                   # Note that it will overwrite args in inference config.
 inference_lm=valid.loss.ave.pth       # Language model path for decoding.
 inference_ngram=${ngram_num}gram.bin
-inference_asr_model=valid.loss.ave_10best.pth # ASR model path for decoding.
+inference_asr_model=valid.acc.ave_10best.pth # ASR model path for decoding.
                                       # e.g.
                                       # inference_asr_model=train.loss.best.pth
                                       # inference_asr_model=3epoch.pth

@@ -31,6 +31,8 @@ test_spm.model
 *.scp
 exp*
 chime4
+reverb
+rename*
 *.png
 tools
 *.yaml
