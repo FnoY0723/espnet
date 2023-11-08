@@ -30,12 +30,11 @@ test_spm.model
 *.log
 *.scp
 exp*
-chime4
-reverb
 rename*
 *.png
 tools
 *.yaml
+
 
 # recipe related
 egs*/*/*/data*
@@ -54,6 +53,9 @@ egs*/*/*/nltk*
 egs*/*/*/.cache*
 egs*/*/*/pretrained_models*
 egs*/fisher_callhome_spanish/*/local/mapping*
+egs2/*/*/hkust_enh_data
+egs2/chime4
+egs2/reverb
 
 # tools related
 tools/chainer
