@@ -85,7 +85,7 @@ class MultiHeadedAttention(nn.Module):
             self.attn = torch.softmax(scores, dim=-1)  # (batch, head, time1, time2)
 
         p_attn = self.dropout(self.attn)
-        x = torch.matmul(p_attn, value)  # (batch, head, time1, d_k)
+        x = torch.matmul(p_attn, value)  # (batch, head, time 1, d_k)
         x = (
             x.transpose(1, 2).contiguous().view(n_batch, -1, self.h * self.d_k)
         )  # (batch, time1, d_model)

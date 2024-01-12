@@ -3,20 +3,20 @@
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 17:30:10
  # @LastEditors: FnoY 1084585914@qq.com
- # @LastEditTime: 2023-06-28 18:24:28
+ # @LastEditTime: 2024-01-10 00:21:12
  # @FilePath: /espnet/egs2/aishell/asr1/run_unimodal.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
-CUDA_VISIBLE_DEVICES=5
+
 set -e
 set -u
 set -o pipefail
 
 train_set=train
 valid_set=dev
-test_sets="dev test"
+test_sets="test"
 
 asr_config=conf/train_asr_unimodal_conformer.yaml
 inference_config=conf/decode_asr_unimodal_attention.yaml
@@ -24,16 +24,18 @@ inference_config=conf/decode_asr_unimodal_attention.yaml
 lm_config=conf/train_lm_transformer.yaml
 use_lm=false
 use_wordlm=false
-expdir=exp_umaconformer_421_enc
+expdir=exp_uma_conformer_12e_69
 inference_asr_model=valid.cer.ave_10best.pth
+use_streaming=false
 
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
 speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr_unimodal.sh \
+    --use_streaming ${use_streaming}  \
     --nj 64 \
-    --inference_nj 1 \
+    --inference_nj 64 \
     --ngpu 1 \
     --lang zh \
     --audio_format "flac.ark" \

@@ -38,10 +38,13 @@ from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.nets.scorers.length_bonus import LengthBonus
 from espnet.utils.cli_utils import get_commandline_args
 
+import os
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import librosa
+import librosa.display
 from espnet2.main_funcs.calculate_all_attentions import calculate_all_attentions
+import math
 
 try:
     from transformers import AutoModelForSeq2SeqLM
@@ -115,8 +118,6 @@ class Speech2Text:
 
         quantize_modules = set([getattr(torch.nn, q) for q in quantize_modules])
         quantize_dtype = getattr(torch, quantize_dtype)
-
-        self.enc_ctc_weight = 0.0
 
         # 1. Build ASR model
         scorers = {}
@@ -274,6 +275,7 @@ class Speech2Text:
         self.enh_s2t_task = enh_s2t_task
         self.multi_asr = multi_asr
 
+        self.draw = False
         self.k=0
 
     @torch.no_grad()
@@ -301,34 +303,40 @@ class Speech2Text:
         if isinstance(speech, np.ndarray):
             speech = torch.tensor(speech)
         
-        # y = speech.cpu().numpy()
-        # sr = 16000
-        # # 计算短时傅里叶变换（STFT）
-        # hop_length = 128
-        # n_fft = 512
-        # stft = librosa.stft(y, n_fft=n_fft, hop_length=hop_length)
+        if self.draw:
+            from matplotlib import gridspec
+            y = speech.cpu().numpy()
+            sr = 16000
+            # 计算短时傅里叶变换（STFT）
+            hop_length = 128
+            n_fft = 512
+            stft = librosa.stft(y, n_fft=n_fft, hop_length=hop_length)
 
-        # # 计算功率谱
-        # power = np.abs(stft)**2
-        # # 绘制spectrogram
-        # freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
-        # times = librosa.frames_to_time(np.arange(power.shape[1]), sr=sr, hop_length=hop_length)
+            # 计算功率谱
+            power = np.abs(stft)**2
+            # 绘制spectrogram
+            freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+            times = librosa.frames_to_time(np.arange(power.shape[1]), sr=sr, hop_length=hop_length)
 
-        # # 指定要截取的频率范围
-        # fmax = 4000  # Hz
+            # 指定要截取的频率范围
+            fmax = 4000  # Hz
 
-        # # 获取要截取的频率范围的索引
-        # idx_max = np.argmin(np.abs(freqs - fmax))
+            # 获取要截取的频率范围的索引
+            idx_max = np.argmin(np.abs(freqs - fmax))
 
-        # 截取指定频率范围的功率谱
-        # power_crop =power[:idx_max, :]
-        # plt.figure(figsize=(15, 4))
-        # librosa.display.specshow(librosa.power_to_db(power_crop, ref=np.max), y_axis='mel', x_axis='time', fmin = 0, fmax = 80,sr=sr, hop_length=hop_length)
-        # plt.xlabel('Time (s)')
-        # plt.ylabel('Frequency')
-        # yticks = [0, 20, 40, 60, 80]
-        # ytick_labels = [0, 20, 40, 60, 80]
-        # plt.yticks(yticks, ytick_labels)
+            # 截取指定频率范围的功率谱
+            power_crop =power[:idx_max, :]
+
+            plt.figure(figsize=(10, 20))
+            spec = gridspec.GridSpec(ncols=1, nrows=4,
+                            height_ratios=[1, 2, 1, 4])
+            plt.subplot(spec[0])
+            librosa.display.specshow(librosa.power_to_db(power_crop, ref=np.max), y_axis='mel', x_axis='time', fmin = 0, fmax = 80,sr=sr, hop_length=hop_length)
+            plt.xlabel('Time (s)')
+            plt.ylabel('Frequency')
+            yticks = [0, 20, 40, 60, 80]
+            ytick_labels = [0, 20, 40, 60, 80]
+            plt.yticks(yticks, ytick_labels)
 
         # data: (Nsamples,) -> (1, Nsamples)
         # logging.info("speech:" + str(speech.shape))
@@ -345,25 +353,43 @@ class Speech2Text:
         batch = to_device(batch, device=self.device)
 
         # b. Forward Encoder
-        enc, enclen = self.asr_model.encode(**batch)
-        enc_out_length.append(enc.size(1))
-        logging.info("encoder out: " + str(enc.size()))
+        enc_before, enclen = self.asr_model.encode(**batch)
+        if isinstance(enc_before, tuple):
+            enc_before = enc_before[0]
+        enc_out_length.append(enc_before.size(1))
+        logging.info("encoder out: " + str(enc_before.size()))
         # logging.info(str(enc))
 
-        if self.enc_ctc_weight!=0.0:
-            ys_pred = self.asr_model.ctc.log_softmax(enc)
-            ys_condition = self.linear_transform(ys_pred)
-            enc = enc + ys_condition
+        if self.draw:
+            plt.subplot(spec[1])
+            plt.imshow(enc_before[0]-enc_before[0].mean(),cmap='coolwarm',aspect="auto")
+            plt.xlim(0,enc_before.shape[1]-1)
 
-        enc, umalen = self.asr_model.uma(enc, enclen)
+        enc, umalen, scalar_importance = self.asr_model.uma(enc_before, enclen)
+        logging.info(f'gaussian_w: {self.asr_model.uma.gaussian_w} gaussian_b: {self.asr_model.uma.gaussian_b}')
+        # logging.info(self.asr_model.uma.linear_sigmoid[0].state_dict())
 
-        
-        # alpha = scalar_importance.cpu().detach().numpy()[0,:,:]
-        # logging.info("alpjfdsaf: "+str(alpha.shape))
-        # plt.plot(np.arange(alpha.shape[0])*speech.shape[1]/(16000*alpha.shape[0]), alpha*60, color='cyan',
-        #          linewidth=2)
-        # plt.savefig(f'./inference_images/hyp_{self.k}.png')
-        # self.k = self.k+1
+        if self.draw:
+            plt.subplot(spec[2])
+            alpha0 = scalar_importance[0].squeeze()
+            plt.plot(alpha0, color='cyan',linewidth=2)
+            plt.ylim(0,max(alpha0)+1)
+            plt.xlim(0,alpha0.shape[0]-1)
+
+            plt.subplot(spec[3])
+            # 自相关attention map
+            # scores = torch.matmul(enc_before[0], enc_before[0].transpose(-2, -1)) / math.sqrt(256)
+            # attn = torch.softmax(scores, dim=-1)  # (batch, head, time1, time2)
+            # alpha1 = attn.squeeze()
+            # qk attention map
+            alpha1 = scalar_importance[1].squeeze()
+            plt.imshow(alpha1, aspect="auto")
+            plt.xlim(0, alpha1.shape[0]-1)
+            image_dir = "./inferce_uma_images_0111"
+            if not os.path.exists(image_dir):
+                os.makedirs(image_dir)
+            plt.savefig(os.path.join(image_dir,f'hyp_{self.k}.png'))
+            self.k = self.k+1
 
         uma_out_length.append(enc.size(1))
         # logging.info("uma out: " + str(enc.size()))
@@ -377,49 +403,6 @@ class Speech2Text:
         assert len(enc) == 1, len(enc)
         logging.info("decoder out: " + str(enc.size()))
         # logging.info(str(enc))
-        
-
-
-        # # 1. Forwarding model and gathering all attentions
-        # #    calculate_all_attentions() uses single gpu only.
-        # batch = {"speech": speech, "speech_lengths": lengths, "text":torch.randint(0,1,(1,6)), "text_lengths": torch.randint(1,10,(1,))}
-        # logging.info(str(batch))
-        # att_dict = calculate_all_attentions(self.asr_model, batch)
-
-        # # 2. Plot attentions: This part is slow due to matplotlib
-        # for k, att_list in att_dict.items():
-        #     for att_w in zip(att_list):
-        #         if isinstance(att_w, torch.Tensor):
-        #             att_w = att_w.detach().cpu().numpy()
-
-        #         if att_w.ndim == 2:
-        #             att_w = att_w[None]
-        #         elif att_w.ndim == 4:
-        #             # In multispkr_asr model case, the dimension could be 4.
-        #             att_w = np.concatenate(
-        #                 [att_w[i] for i in range(att_w.shape[0])], axis=0
-        #             )
-        #         elif att_w.ndim > 4 or att_w.ndim == 1:
-        #             raise RuntimeError(f"Must be 2, 3 or 4 dimension: {att_w.ndim}")
-
-        #         w, h = plt.figaspect(1.0 / len(att_w))
-        #         fig = plt.Figure(figsize=(w * 1.3, h * 1.3))
-        #         axes = fig.subplots(1, len(att_w))
-        #         if len(att_w) == 1:
-        #             axes = [axes]
-
-        #         for ax, aw in zip(axes, att_w):
-        #             ax.imshow(aw.astype(np.float32), aspect="auto")
-        #             ax.set_title(f"{k}")
-        #             ax.set_xlabel("Input")
-        #             ax.set_ylabel("Output")
-        #             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        #             ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-
-                
-        #         fig.savefig((f'./inference_images/hyp_{self.k}.png'))
-        #         self.k = self.k+1
-
 
         # c. Passed the encoder result and the beam search
         results = self._decode_single_sample(enc[0])

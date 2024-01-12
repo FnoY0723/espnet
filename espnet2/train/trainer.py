@@ -630,7 +630,6 @@ class Trainer:
                     scaler.scale(loss).backward()
                 else:
                     loss.backward()
-
             if iiter % accum_grad == 0:
                 if scaler is not None:
                     # Unscales the gradients of optimizer's assigned params in-place

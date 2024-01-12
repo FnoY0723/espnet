@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+###
+ # @Author: FnoY fangying@westlake.edu.cn
+ # @LastEditors: FnoY 1084585914@qq.com
+ # @LastEditTime: 2023-12-18 20:54:58
+ # @FilePath: /espnet/egs2/timit/asr1/run.sh
+### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 set -e
@@ -18,12 +24,20 @@ else
     token_type="${trans_type}"
 fi
 
-asr_config=conf/train_asr.yaml
+asr_config=conf/train_asr_conformer.yaml
 lm_config=conf/train_lm_rnn.yaml
 inference_config=conf/decode_asr.yaml
-
+use_lm=false
+expdir=exp_conformer
+inference_asr_model=valid.acc.ave_10best.pth
 
 ./asr.sh \
+    --nj 64 \
+    --inference_nj 64  \
+    --ngpu 1 \
+    --use_lm ${use_lm}                                 \
+    --expdir ${expdir}                                 \
+    --inference_asr_model ${inference_asr_model}       \
     --token_type "${token_type}" \
     --train_set "${train_set}" \
     --valid_set "${train_dev}" \

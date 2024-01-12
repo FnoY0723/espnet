@@ -1,36 +1,34 @@
-# Copyright 2019 Shigeki Karita
-#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
-"""Unimodal attention definition."""
+'''
+Author: FnoY fangying@westlake.edu.cn
+LastEditTime: 2023-12-28 18:39:20
+FilePath: /espnet/espnet2/asr/uma.py
+Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
+'''
+# """Unimodal aggregation definition."""
 import logging
 from typing import Optional, Tuple
 import torch
 from typeguard import check_argument_types
-from espnet.nets.pytorch_backend.transformer.attention import (
-    LegacyRelPositionMultiHeadedAttention,
-    MultiHeadedAttention,
-    RelPositionMultiHeadedAttention,
-)
-from matplotlib import pyplot as plt
-import librosa
+
 
 class UMA(torch.nn.Module):
     """UMA module.
 
-    Args:
     """
 
     def __init__(
         self,
-        input_size: int = 256,
+        input_size: int = 512,
         output_size: int = 256,
     ):
         assert check_argument_types()
         super().__init__()
         self._output_size = output_size
+        input_size = output_size
 
         self.linear_sigmoid = torch.nn.Sequential(
-            torch.nn.Linear(256, 1),
+            torch.nn.Linear(input_size, 1),
             torch.nn.Sigmoid(),
         )
 
@@ -41,60 +39,50 @@ class UMA(torch.nn.Module):
         self,
         xs_pad: torch.Tensor,
         olens: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Calculate forward propagation.
 
         Args:
             xs_pad (torch.Tensor): Input tensor (#batch, L, input_size).
-            ilens (torch.Tensor): Input length (#batch).
+            olens (torch.Tensor): Input length (#batch).
             prev_states (torch.Tensor): Not to be used now.
         Returns:
-            torch.Tensor: Output tensor (#batch, L, output_size).
+            torch.Tensor: Output tensor (#batch, I, output_size).
             torch.Tensor: Output length (#batch).
             torch.Tensor: Not to be used now.
         """
-        # Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]
 
-        # masks = (~make_pad_mask(olens)[:, None, :]).to(xs_pad.device)
-        # unimodal attention
-        # plt.clf()
-        # plt.plot(xs_pad.cpu().detach().numpy()[0,:,1], color='black')
-        # print(olens)
         batch, length, _ = xs_pad.size()
+        # Use Linear-Sigmoid to generate unimodal aggregation weights
+        # uma_weights: (#batch, L, 1)
+        # import math
+        # scores = torch.matmul(xs_pad, xs_pad.transpose(-2, -1)) / math.sqrt(256)
+        # p_attn = torch.softmax(scores, dim=-1)
 
-        scalar_importance = self.linear_sigmoid(xs_pad)
-        
-        # plt.plot(scalar_importance.cpu().detach().numpy()[0,:,:], color='blue')
-        # plt.savefig(f'./inference_images/hyp_{olens[0]}.png')
-        # k = k+1
-        
-        # score = self.pooling_proj(xs_pad) / self._output_size**0.5 # (batch, T, 1)
-        # scalar_importance = torch.softmax(score, dim=1)
+        uma_weights = self.linear_sigmoid(xs_pad)
 
-        # print("alpha: ", scalar_importance)
-        alpha_h = torch.mul(scalar_importance, xs_pad)
+        # Unimodal Detection
+        scalar_before = uma_weights[:,:-1,:].detach() # (#batch, L-1, 1)
+        scalar_after = uma_weights[:,1:,:].detach() # (#batch, L-1, 1)
+        scalar_before = torch.nn.functional.pad(scalar_before,(0,0,1,0))    # (#batch, L, 1)
+        scalar_after = torch.nn.functional.pad(scalar_after,(0,0,0,1))  # (#batch, L, 1)
 
-        # find valleys' index
-        scalar_before = scalar_importance[:,:-1,:].detach()
-        scalar_after = scalar_importance[:,1:,:].detach()
-        scalar_before = torch.nn.functional.pad(scalar_before,(0,0,1,0))
-        scalar_after = torch.nn.functional.pad(scalar_after,(0,0,0,1))
-
-        mask = (scalar_importance.lt(scalar_before)) & (scalar_importance.lt(scalar_after))
-        mask = mask.reshape(scalar_importance.shape[0], -1)
+        mask = (uma_weights.lt(scalar_before)) & (uma_weights.lt(scalar_after)) # bool tensor (#batch, L, 1)
+        mask = mask.reshape(uma_weights.shape[0], -1) # bool tensor (#batch, L)
         mask[:,0] = True
-        batch_index = mask.nonzero()[:,0]
-        valley_index_start = mask.nonzero()[:,1]
+        # mask.nonzero() is [[0,0],[0,3],[0,7],...,[1,0],[1,2],...,[2,0],[2,4],...,[#batch-1,0],...]
+        # mask.nonzero() : (K,2); K is the total number of valleys in this batch
+        batch_index = mask.nonzero()[:,0] # (k,1); [0,0,0,...,1,1,...,2,2,...,#batch-1,...]
+        valley_index_start = mask.nonzero()[:,1] # (k,1); [0,3,7,...,0,2,...,0,4,...,0,...]
         mask[:,0] = False
         mask[:,-1] = True
-        valley_index_end = mask.nonzero()[:,1] + 2
+        valley_index_end = mask.nonzero()[:,1] + 2 
+        # (k,1); [5,9,...,4,...,6,...]
         valley_index_end = torch.where(valley_index_end > (length) * torch.ones_like(valley_index_end), 
                                        (length) * torch.ones_like(valley_index_end), valley_index_end)
-        # print(valley_index_start.shape)
-        # print(valley_index_end.shape)
 
-        _,counts = torch.unique(batch_index, return_counts = True)
-        max_counts = (torch.max(counts)).item()
+        _,counts = torch.unique(batch_index, return_counts = True) # (#batch, 1); the number of valleys in each sample
+        max_counts = (torch.max(counts)).item() 
 
         utri_mat1 = torch.tril(torch.ones(max_counts+1,max_counts),-1).to(xs_pad.device)
         batch_index_mask = utri_mat1[counts]
@@ -110,16 +98,12 @@ class UMA(torch.nn.Module):
         output_mask = (utri_mat[valleys[:,1]]-utri_mat[valleys[:,0]]).reshape(batch, max_counts, length)
         output_mask = output_mask.detach()
 
-        # print(counts)
-        # print(output_mask.shape)
-        # print(alpha_h.shape)
-        # print(scalar_importance.shape)
-        xs_pad = torch.bmm(output_mask, alpha_h) / torch.bmm(output_mask, scalar_importance).clamp_(1e-6)
-
-        # print(xs_pad.size())
-        olens = (olens / olens[0] * xs_pad.shape[1]).type_as(olens)
-        # print(olens)
-        # olens = counts
+        # Aggregation
+        alpha_h = torch.mul(uma_weights, xs_pad)
+        xs_pad = torch.bmm(output_mask, alpha_h) / torch.bmm(output_mask, uma_weights).clamp_(1e-6)
+ 
+        # olens = (olens / olens[0] * xs_pad.shape[1]).type_as(olens)
+        olens = counts
         
-        # return xs_pad, olens, scalar_importance
-        return xs_pad, olens
+        # return xs_pad, olens, (uma_weights, p_attn)
+        return xs_pad, olens, None

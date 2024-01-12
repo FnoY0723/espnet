@@ -79,7 +79,7 @@ SPGISPEECH=
 SWBD=
 SWBD_NXT=
 THCHS30=downloads
-TIMIT=
+TIMIT=/data/home/fangying/espnet/egs2/timit/asr1/downloads/TIMIT
 TSUKUYOMI=downloads
 VOXFORGE=downloads
 AMI=
@@ -262,7 +262,7 @@ if [[ "$(hostname -d)" == clsp.jhu.edu ]]; then
     JVS=downloads
     KSS=
     THCHS30=downloads
-    TIMIT=
+    TIMIT=/data/home/fangying/espnet/egs2/timit/asr1/downloads/TIMIT
     TSUKUYOMI=downloads
     VOXFORGE=
     AMI=/export/corpora4/ami/amicorpus

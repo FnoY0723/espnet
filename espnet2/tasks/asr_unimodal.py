@@ -7,7 +7,7 @@ import torch
 from typeguard import check_argument_types, check_return_type
 
 from espnet2.asr.ctc import CTC
-from espnet2.asr.uma import UMA
+from espnet2.asr.uma_att import UMA
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.decoder.unimodal_attention_decoder import UnimodalAttentionDecoder
 from espnet2.asr.decoder.unimodal_conformer_decoder import UnimodalConformerDecoder
@@ -38,7 +38,8 @@ from espnet2.asr.encoder.contextual_block_conformer_encoder import (
 from espnet2.asr.encoder.contextual_block_transformer_encoder import (
     ContextualBlockTransformerEncoder,
 )
-from espnet2.asr.encoder.e_branchformer_encoder import EBranchformerEncoder
+# from espnet2.asr.encoder.e_branchformer_encoder import EBranchformerEncoder
+from espnet2.asr.encoder.e_branchformer_condition_encoder import EBranchformerEncoder
 from espnet2.asr.encoder.hubert_encoder import (
     FairseqHubertEncoder,
     FairseqHubertPretrainEncoder,

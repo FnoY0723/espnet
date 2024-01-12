@@ -1197,7 +1197,8 @@ class AbsTask(ABC):
                     scheduler = None
 
                 schedulers.append(scheduler)
-
+            # for name, parameters in model.named_parameters():
+            #     print(name, ':', parameters.size())
             logging.info(pytorch_cudnn_version())
             logging.info(model_summary(model))
             for i, (o, s) in enumerate(zip(optimizers, schedulers), 1):
