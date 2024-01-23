@@ -1,6 +1,6 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-01-10 21:17:48
+LastEditTime: 2024-01-22 15:32:07
 FilePath: /espnet/espnet2/asr/unimodal_attention_model.py
 '''
 import logging
@@ -270,8 +270,8 @@ class UAMASRModel(AbsESPnetModel):
         
         # 3. unimodal attention module
         uma_out, uma_out_lens, (gaussian_w,gaussian_b) = self.uma(encoder_out, encoder_out_lens)
-        stats["gaussian_w"] = gaussian_w
-        stats["gaussian_b"] = gaussian_b
+        # stats["gaussian_w"] = gaussian_w
+        # stats["gaussian_b"] = gaussian_b
         # logging.info("uma_out_length: "+ (str(uma_out_lens)))
 
         # 2. Decoder

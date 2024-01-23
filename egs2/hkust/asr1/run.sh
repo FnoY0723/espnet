@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
+###
+ # @Author: FnoY fangying@westlake.edu.cn
+ # @LastEditors: FnoY 1084585914@qq.com
+ # @LastEditTime: 2024-01-22 21:01:10
+ # @FilePath: /espnet/egs2/hkust/asr1/run.sh
+### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
-CUDA_VISIBLE_DEVICES="4"
 set -e
 set -u
 set -o pipefail

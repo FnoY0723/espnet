@@ -1,7 +1,7 @@
 
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-01-11 21:34:41
+LastEditTime: 2024-01-18 19:28:59
 FilePath: /espnet/espnet2/asr/uma_att.py
 Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
 '''
@@ -35,9 +35,9 @@ class UMA(torch.nn.Module):
         #     torch.nn.Sigmoid(),
         # )
         
-        self.gaussian_w = torch.nn.Parameter(torch.tensor(1e-10),requires_grad=True)
+        # self.gaussian_w = torch.nn.Parameter(torch.tensor(1e-10),requires_grad=True)
         # self.gaussian_b = None
-        self.gaussian_bias = None
+        # self.gaussian_bias = None
         # self.gaussian_w = 0.005
         # self.gaussian_b = -0.05
         # self.gaussian_w = 0.005
@@ -109,13 +109,13 @@ class UMA(torch.nn.Module):
         
         # qk_mask = (torch.tril(torch.ones(length,length), diagonal=5) - 
         #             torch.tril(torch.ones(length,length),diagonal=-5)).to(xs_pad.device).reshape(1,length,length)
-        gaussian_map = (torch.arange(0, length)).repeat(length, 1).to(xs_pad.device)
-        distance_squre = torch.square(gaussian_map - gaussian_map.T)
+        # gaussian_map = (torch.arange(0, length)).repeat(length, 1).to(xs_pad.device)
+        # distance_squre = torch.square(gaussian_map - gaussian_map.T)
 
         # logging.info(f'gaussian_w: {self.gaussian_w}, gaussian_b: {self.gaussian_b}')
-        self.gaussian_bias = torch.abs(self.gaussian_w * distance_squre)
+        # self.gaussian_bias = torch.abs(self.gaussian_w * distance_squre)
         # self.gaussian_bias = torch.abs(self.gaussian_w * distance_squre + self.gaussian_b)
-        scores = scores - self.gaussian_bias
+        # scores = scores - self.gaussian_bias
         # logging.info(qk_mask.shape, scores.shape)
         # scores = torch.bmm(qk_mask, scores.squeeze(1))
 
@@ -193,7 +193,7 @@ class UMA(torch.nn.Module):
         # olens = (olens / olens[0] * xs_pad.shape[1]).type_as(olens)
         olens = counts
 
-        # return xs_pad, olens, (uma_weights, p_attn)
-        return xs_pad, olens, (self.gaussian_w, None)
+        return xs_pad, olens, (uma_weights, p_attn)
+        # return xs_pad, olens, (self.gaussian_w, None)
         # return xs_pad, olens, uma_weights
         # return xs_pad, olens, None

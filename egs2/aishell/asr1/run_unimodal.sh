@@ -3,7 +3,7 @@
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 17:30:10
  # @LastEditors: FnoY 1084585914@qq.com
- # @LastEditTime: 2024-01-10 00:21:12
+ # @LastEditTime: 2024-01-22 15:13:06
  # @FilePath: /espnet/egs2/aishell/asr1/run_unimodal.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
@@ -26,7 +26,7 @@ use_lm=false
 use_wordlm=false
 expdir=exp_uma_conformer_12e_69
 inference_asr_model=valid.cer.ave_10best.pth
-use_streaming=false
+use_streaming=true
 
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)

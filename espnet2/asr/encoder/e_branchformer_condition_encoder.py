@@ -15,6 +15,7 @@ from typing import List, Optional, Tuple
 import torch
 from typeguard import check_argument_types
 
+from espnet2.asr.uma import UMA
 from espnet2.asr.ctc import CTC
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.layers.cgmlp import ConvolutionalGatingMLP
@@ -386,6 +387,8 @@ class EBranchformerEncoder(AbsEncoder):
             assert 0 < min(interctc_layer_idx) and max(interctc_layer_idx) <= num_blocks
         self.interctc_use_conditioning = interctc_use_conditioning
         self.conditioning_layer = None
+        # self.uma = UMA(256, 256)
+        # self.uma_pos = pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len)
 
     def output_size(self) -> int:
         return self._output_size
@@ -408,7 +411,7 @@ class EBranchformerEncoder(AbsEncoder):
             torch.Tensor: Output length (#batch).
             torch.Tensor: Not to be used now.
         """
-
+        
         masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
 
         if (
@@ -429,6 +432,11 @@ class EBranchformerEncoder(AbsEncoder):
             xs_pad, masks = self.embed(xs_pad, masks)
         elif self.embed is not None:
             xs_pad = self.embed(xs_pad)
+
+        # downsample_lens = masks.squeeze(1).sum(1)
+        # uma_out, uma_out_lens, _ = self.uma(xs_pad[0], downsample_lens)
+        # xs_pad = self.uma_pos(uma_out)
+        # masks = (~make_pad_mask(uma_out_lens)[:, None, :]).to(uma_out.device)
 
         intermediate_outs = []
         if len(self.interctc_layer_idx) == 0:
