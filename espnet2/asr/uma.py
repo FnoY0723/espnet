@@ -1,7 +1,7 @@
 
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2023-12-28 18:39:20
+LastEditTime: 2024-01-25 19:49:04
 FilePath: /espnet/espnet2/asr/uma.py
 Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
 '''
@@ -10,6 +10,7 @@ import logging
 from typing import Optional, Tuple
 import torch
 from typeguard import check_argument_types
+from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
 
 
 class UMA(torch.nn.Module):
@@ -19,13 +20,30 @@ class UMA(torch.nn.Module):
 
     def __init__(
         self,
-        input_size: int = 512,
+        input_size: int = 256,
         output_size: int = 256,
     ):
         assert check_argument_types()
         super().__init__()
         self._output_size = output_size
         input_size = output_size
+
+        # self.norm = LayerNorm(input_size)
+
+        # kernel_size = 7
+        # self.gen_uma = torch.nn.Sequential(
+        #     torch.nn.GELU(),
+        #     torch.nn.Conv1d(
+        #         input_size,
+        #         input_size,
+        #         kernel_size,
+        #         1,
+        #         (kernel_size - 1) // 2,
+        #         groups=input_size,
+        #     ),
+        #     torch.nn.Linear(input_size, 1),
+        #     torch.nn.Sigmoid(),
+        # )
 
         self.linear_sigmoid = torch.nn.Sequential(
             torch.nn.Linear(input_size, 1),
@@ -53,11 +71,8 @@ class UMA(torch.nn.Module):
         """
 
         batch, length, _ = xs_pad.size()
-        # Use Linear-Sigmoid to generate unimodal aggregation weights
-        # uma_weights: (#batch, L, 1)
-        # import math
-        # scores = torch.matmul(xs_pad, xs_pad.transpose(-2, -1)) / math.sqrt(256)
-        # p_attn = torch.softmax(scores, dim=-1)
+        # xs_pad = self.norm(xs_pad)
+        # uma_weights = self.gen_uma(xs_pad)
 
         uma_weights = self.linear_sigmoid(xs_pad)
 

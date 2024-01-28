@@ -366,7 +366,7 @@ class Speech2Text:
             plt.xlim(0,enc_before.shape[1]-1)
 
         enc, umalen, scalar_importance = self.asr_model.uma(enc_before, enclen)
-        logging.info(f'gaussian_w: {self.asr_model.uma.gaussian_w} gaussian_b: {self.asr_model.uma.gaussian_b}')
+        # logging.info(f'gaussian_w: {self.asr_model.uma.gaussian_w} gaussian_b: {self.asr_model.uma.gaussian_b}')
         # logging.info(self.asr_model.uma.linear_sigmoid[0].state_dict())
 
         if self.draw:

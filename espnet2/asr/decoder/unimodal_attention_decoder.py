@@ -9,7 +9,7 @@ from typeguard import check_argument_types
 
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
-from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
+from espnet.nets.pytorch_backend.transformer.attention import StreamingMultiHeadedAttention
 from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
 from espnet.nets.pytorch_backend.transformer.encoder_layer import EncoderLayer
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
@@ -121,7 +121,7 @@ class UnimodalAttentionDecoder(AbsDecoder):
             num_blocks,
             lambda lnum: EncoderLayer(
                 output_size,
-                MultiHeadedAttention(
+                StreamingMultiHeadedAttention(
                     attention_heads, output_size, attention_dropout_rate
                 ),
                 positionwise_layer(*positionwise_layer_args),

@@ -7,7 +7,7 @@
 """Multi-Head Attention layer definition."""
 
 import math
-import logging
+
 import torch
 from torch import nn
 
@@ -109,75 +109,6 @@ class MultiHeadedAttention(nn.Module):
         q, k, v = self.forward_qkv(query, key, value)
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
         return self.forward_attention(v, scores, mask)
-
-
-class StreamingMultiHeadedAttention(MultiHeadedAttention):
-
-    def __init__(self, n_head, n_feat, dropout_rate):
-        """Construct an RelPositionMultiHeadedAttention object."""
-        super().__init__(n_head, n_feat, dropout_rate)
-      
-    def streaming_forward_attention(self, value, scores, mask):
-        """Compute attention context vector.
-
-        Args:
-            value (torch.Tensor): Transformed value (#batch, n_head, time2, d_k).
-            scores (torch.Tensor): Attention score (#batch, n_head, time1, time2).
-            mask (torch.Tensor): Mask (#batch, 1, time2) or (#batch, time1, time2).
-
-        Returns:
-            torch.Tensor: Transformed value (#batch, time1, d_model)
-                weighted by the attention score (#batch, time1, time2).
-
-        """
-        n_batch = value.size(0)
-
-        length = value.size(-2)
-        att_mask = torch.tril(torch.ones(length,length)).bool().to(value.device)
-        min_value = torch.finfo(scores.dtype).min
-        scores = scores.masked_fill(~att_mask[None,None,:,:], min_value)
-
-        if mask is not None:
-            mask = mask.unsqueeze(1).eq(0)  # (batch, 1, *, time2)
-            min_value = torch.finfo(scores.dtype).min
-            scores = scores.masked_fill(mask, min_value)
-            self.attn = torch.softmax(scores, dim=-1).masked_fill(
-                mask, 0.0
-            )  # (batch, head, time1, time2)
-        else:
-            self.attn = torch.softmax(scores, dim=-1)  # (batch, head, time1, time2)
-        
-        # length = value.size(-2)
-        # att_mask = torch.tril(torch.ones(length,length)).unsqueeze(0).unsqueeze(0).to(value.device)
-        # self.attn = self.attn * att_mask
-        p_attn = self.dropout(self.attn)
-        # logging.info(p_attn[0,0,:,:])
-        # logging.info(p_attn.shape)
-
-        x = torch.matmul(p_attn, value)  # (batch, head, time 1, d_k)
-        x = (
-            x.transpose(1, 2).contiguous().view(n_batch, -1, self.h * self.d_k)
-        )  # (batch, time1, d_model)
-
-        return self.linear_out(x)  # (batch, time1, d_model)
-
-    def forward(self, query, key, value, mask):
-        """Compute scaled dot product attention.
-
-        Args:
-            query (torch.Tensor): Query tensor (#batch, time1, size).
-            key (torch.Tensor): Key tensor (#batch, time2, size).
-            value (torch.Tensor): Value tensor (#batch, time2, size).
-            mask (torch.Tensor): Mask tensor (#batch, 1, time2) or
-                (#batch, time1, time2).
-
-        Returns:
-            torch.Tensor: Output tensor (#batch, time1, d_model).
-
-        """
-        q, k, v = self.forward_qkv(query, key, value)
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
-        return self.streaming_forward_attention(v, scores, mask)
 
 
 class LegacyRelPositionMultiHeadedAttention(MultiHeadedAttention):

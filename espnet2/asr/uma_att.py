@@ -1,7 +1,7 @@
 
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-01-18 19:28:59
+LastEditTime: 2024-01-25 16:12:54
 FilePath: /espnet/espnet2/asr/uma_att.py
 Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
 '''

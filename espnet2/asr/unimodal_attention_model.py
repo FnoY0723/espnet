@@ -1,6 +1,6 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-01-22 15:32:07
+LastEditTime: 2024-01-25 20:46:31
 FilePath: /espnet/espnet2/asr/unimodal_attention_model.py
 '''
 import logging
@@ -11,7 +11,7 @@ import torch
 from packaging.version import parse as V
 from typeguard import check_argument_types
 
-from espnet2.asr.uma_att import UMA
+from espnet2.asr.uma import UMA
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
@@ -269,7 +269,7 @@ class UAMASRModel(AbsESPnetModel):
         stats = dict()
         
         # 3. unimodal attention module
-        uma_out, uma_out_lens, (gaussian_w,gaussian_b) = self.uma(encoder_out, encoder_out_lens)
+        uma_out, uma_out_lens, _ = self.uma(encoder_out, encoder_out_lens)
         # stats["gaussian_w"] = gaussian_w
         # stats["gaussian_b"] = gaussian_b
         # logging.info("uma_out_length: "+ (str(uma_out_lens)))
