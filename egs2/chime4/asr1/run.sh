@@ -2,6 +2,12 @@
 ###
  # @Author: FnoY fangying@westlake.edu.cn
  # @LastEditors: FnoY 1084585914@qq.com
+ # @LastEditTime: 2024-01-29 19:11:02
+ # @FilePath: /espnet/egs2/chime4/asr1/run.sh
+### 
+###
+ # @Author: FnoY fangying@westlake.edu.cn
+ # @LastEditors: FnoY 1084585914@qq.com
  # @LastEditTime: 2023-11-07 13:13:37
  # @FilePath: /espnet/egs2/chime4/asr1/run.sh
 ### 

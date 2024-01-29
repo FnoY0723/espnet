@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+###
+ # @Author: FnoY fangying@westlake.edu.cn
+ # @LastEditors: FnoY 1084585914@qq.com
+ # @LastEditTime: 2024-01-29 13:00:08
+ # @FilePath: /espnet/egs2/aishell/asr1/run_streaming.sh
+### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 set -e
@@ -13,12 +19,14 @@ asr_config=conf/train_asr_streaming_transformer.yaml
 inference_config=conf/decode_asr_streaming.yaml
 
 lm_config=conf/train_lm.yaml
-use_lm=true
+use_lm=false
 use_wordlm=false
 
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
 speed_perturb_factors="0.9 1.0 1.1"
+expdir=exp_streaming_conformer_ctc_15e_0129
+inference_asr_model=valid.cer.ave_10best.pth
 
 ./asr.sh                                               \
     --use_streaming true                               \
@@ -30,6 +38,8 @@ speed_perturb_factors="0.9 1.0 1.1"
     --use_word_lm ${use_wordlm}                        \
     --lm_config "${lm_config}"                         \
     --asr_config "${asr_config}"                       \
+    --expdir ${expdir}                                 \
+    --inference_asr_model ${inference_asr_model}       \
     --inference_config "${inference_config}"           \
     --train_set "${train_set}"                         \
     --valid_set "${valid_set}"                         \

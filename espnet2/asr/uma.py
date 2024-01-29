@@ -1,7 +1,7 @@
 
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-01-25 19:49:04
+LastEditTime: 2024-01-29 18:18:11
 FilePath: /espnet/espnet2/asr/uma.py
 Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
 '''
@@ -28,7 +28,7 @@ class UMA(torch.nn.Module):
         self._output_size = output_size
         input_size = output_size
 
-        # self.norm = LayerNorm(input_size)
+        self.before_norm = LayerNorm(input_size)
 
         # kernel_size = 7
         # self.gen_uma = torch.nn.Sequential(
@@ -50,6 +50,8 @@ class UMA(torch.nn.Module):
             torch.nn.Sigmoid(),
         )
 
+        self.after_norm = LayerNorm(input_size)
+
     def output_size(self) -> int:
         return self._output_size
 
@@ -65,13 +67,13 @@ class UMA(torch.nn.Module):
             olens (torch.Tensor): Input length (#batch).
             prev_states (torch.Tensor): Not to be used now.
         Returns:
-            torch.Tensor: Output tensor (#batch, I, output_size).
+            torch.Tensor: Output tensor (#batch, I, output_size).  
             torch.Tensor: Output length (#batch).
             torch.Tensor: Not to be used now.
         """
 
         batch, length, _ = xs_pad.size()
-        # xs_pad = self.norm(xs_pad)
+        xs_pad = self.before_norm(xs_pad)
         # uma_weights = self.gen_uma(xs_pad)
 
         uma_weights = self.linear_sigmoid(xs_pad)
@@ -116,7 +118,8 @@ class UMA(torch.nn.Module):
         # Aggregation
         alpha_h = torch.mul(uma_weights, xs_pad)
         xs_pad = torch.bmm(output_mask, alpha_h) / torch.bmm(output_mask, uma_weights).clamp_(1e-6)
- 
+
+        xs_pad = self.after_norm(xs_pad)
         # olens = (olens / olens[0] * xs_pad.shape[1]).type_as(olens)
         olens = counts
         
