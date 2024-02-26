@@ -1,7 +1,7 @@
 
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-01-29 18:18:11
+LastEditTime: 2024-02-26 09:50:14
 FilePath: /espnet/espnet2/asr/uma.py
 Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
 '''
@@ -28,7 +28,7 @@ class UMA(torch.nn.Module):
         self._output_size = output_size
         input_size = output_size
 
-        self.before_norm = LayerNorm(input_size)
+        # self.before_norm = LayerNorm(input_size)
 
         # kernel_size = 7
         # self.gen_uma = torch.nn.Sequential(
@@ -71,9 +71,9 @@ class UMA(torch.nn.Module):
             torch.Tensor: Output length (#batch).
             torch.Tensor: Not to be used now.
         """
-
+        # logging.info(f'xspad:{xs_pad.shape}, olens:{olens}')
         batch, length, _ = xs_pad.size()
-        xs_pad = self.before_norm(xs_pad)
+        # xs_pad = self.before_norm(xs_pad)
         # uma_weights = self.gen_uma(xs_pad)
 
         uma_weights = self.linear_sigmoid(xs_pad)
@@ -122,6 +122,6 @@ class UMA(torch.nn.Module):
         xs_pad = self.after_norm(xs_pad)
         # olens = (olens / olens[0] * xs_pad.shape[1]).type_as(olens)
         olens = counts
-        
+        # logging.info(f'olens:{olens}')
         # return xs_pad, olens, (uma_weights, p_attn)
         return xs_pad, olens, None

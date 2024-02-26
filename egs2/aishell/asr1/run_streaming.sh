@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 ###
  # @Author: FnoY fangying@westlake.edu.cn
- # @LastEditors: FnoY 1084585914@qq.com
- # @LastEditTime: 2024-01-29 13:00:08
+ # @LastEditors: FnoY0723 fangying@westlake.edu.cn
+ # @LastEditTime: 2024-02-15 11:10:35
  # @FilePath: /espnet/egs2/aishell/asr1/run_streaming.sh
 ### 
 # Set bash to 'debug' mode, it will exit on :
@@ -13,7 +13,7 @@ set -o pipefail
 
 train_set=train
 valid_set=dev
-test_sets="dev test"
+test_sets="test"
 
 asr_config=conf/train_asr_streaming_transformer.yaml
 inference_config=conf/decode_asr_streaming.yaml
@@ -26,7 +26,7 @@ use_wordlm=false
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
 speed_perturb_factors="0.9 1.0 1.1"
 expdir=exp_streaming_conformer_ctc_15e_0129
-inference_asr_model=valid.cer.ave_10best.pth
+inference_asr_model=valid.cer_ctc.ave_10best.pth
 
 ./asr.sh                                               \
     --use_streaming true                               \

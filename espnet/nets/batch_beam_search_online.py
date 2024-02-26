@@ -115,6 +115,10 @@ class BatchBeamSearchOnline(BatchBeamSearch):
             list[Hypothesis]: N-best decoding results
 
         """
+        flag_x = x.shape[0] > 0
+
+        self.encbuffer = None
+
         if self.encbuffer is None:
             self.encbuffer = x
         else:
@@ -133,9 +137,13 @@ class BatchBeamSearchOnline(BatchBeamSearch):
             cur_end_frame = (
                 self.block_size - self.look_ahead + self.hop_size * self.processed_block
             )
-            if cur_end_frame < x.shape[0]:
-                h = x.narrow(0, 0, cur_end_frame)
+            # if cur_end_frame < x.shape[0]:
+            #     h = x.narrow(0, 0, cur_end_frame)
+            #     block_is_final = False
+            if flag_x:
+                h = x
                 block_is_final = False
+                flag_x = False
             else:
                 if is_final:
                     h = x
@@ -143,6 +151,7 @@ class BatchBeamSearchOnline(BatchBeamSearch):
                 else:
                     break
 
+            logging.info(f"cur_end_frame: {cur_end_frame}, is_final: {is_final}, self.processed_block: {self.processed_block}, x.shape: {x.shape}, block_is_final: {block_is_final}")
             logging.debug("Start processing block: %d", self.processed_block)
             logging.debug(
                 "  Feature length: {}, current position: {}".format(
@@ -189,6 +198,7 @@ class BatchBeamSearchOnline(BatchBeamSearch):
                 self.running_hyps = self.post_process(
                     self.process_idx, maxlen, maxlenratio, best, self.ended_hyps
                 )
+
             n_batch = best.yseq.shape[0]
             local_ended_hyps = []
             is_local_eos = best.yseq[torch.arange(n_batch), best.length - 1] == self.eos
@@ -226,7 +236,7 @@ class BatchBeamSearchOnline(BatchBeamSearch):
             ):
                 logging.info(f"end detected at {self.process_idx}")
                 return self.assemble_hyps(self.ended_hyps)
-
+            
             if len(local_ended_hyps) > 0 and not is_final:
                 logging.info("Detected hyp(s) reaching EOS in this block.")
                 break
@@ -235,7 +245,7 @@ class BatchBeamSearchOnline(BatchBeamSearch):
             self.running_hyps = self.post_process(
                 self.process_idx, maxlen, maxlenratio, best, self.ended_hyps
             )
-
+            
             if is_final:
                 for hyp in local_ended_hyps:
                     self.ended_hyps.append(hyp)

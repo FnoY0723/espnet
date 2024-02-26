@@ -1,6 +1,6 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-01-29 14:00:15
+LastEditTime: 2024-01-29 14:02:44
 FilePath: /espnet/espnet2/asr/unimodal_attention_model.py
 '''
 import logging
@@ -183,14 +183,14 @@ class UAMASRModel(AbsESPnetModel):
             #     decoder = None
             #     logging.warning("Set decoder to none as ctc_weight==1.0")
 
-            self.decoder = decoder
+            self.decoder = None
 
-            if not hasattr(self.decoder, "interctc_use_conditioning"):
-                self.decoder.interctc_use_conditioning = False
-            if self.decoder.interctc_use_conditioning:
-                self.decoder.conditioning_layer = torch.nn.Linear(
-                    vocab_size, self.decoder.output_size()
-                )
+            # if not hasattr(self.decoder, "interctc_use_conditioning"):
+            #     self.decoder.interctc_use_conditioning = False
+            # if self.decoder.interctc_use_conditioning:
+            #     self.decoder.conditioning_layer = torch.nn.Linear(
+            #         vocab_size, self.decoder.output_size()
+            #     )
 
             self.criterion_att = LabelSmoothingLoss(
                 size=vocab_size,
@@ -275,18 +275,18 @@ class UAMASRModel(AbsESPnetModel):
         # logging.info("uma_out_length: "+ (str(uma_out_lens)))
 
         # 2. Decoder
-        decoder_out, decoder_out_lens = self.decoder(uma_out, uma_out_lens, text, text_lengths, self.ctc)
+        # decoder_out, decoder_out_lens = self.decoder(uma_out, uma_out_lens, text, text_lengths, self.ctc)
         # print("decoder_out: ", decoder_out_lens)
-        intermediate_outs_dec = None
-        if isinstance(decoder_out, tuple):
-            intermediate_outs_dec = decoder_out[1]
-            decoder_out = decoder_out[0]
+        # intermediate_outs_dec = None
+        # if isinstance(decoder_out, tuple):
+        #     intermediate_outs_dec = decoder_out[1]
+        #     decoder_out = decoder_out[0]
 
 
         # 1. CTC branch
         if self.ctc_weight != 0.0:
             loss_ctc, cer_ctc = self._calc_ctc_loss(
-                decoder_out, decoder_out_lens, text, text_lengths
+                uma_out, uma_out_lens, text, text_lengths
             )
 
             # Collect CTC branch stats
@@ -335,51 +335,49 @@ class UAMASRModel(AbsESPnetModel):
 
             loss_interctc_enc = loss_interctc_enc / len(intermediate_outs_enc)
 
-        # Decoder Intermediate CTC (optional)
-        loss_interctc_dec = 0.0
-        if self.interctc_weight_dec != 0.0 and intermediate_outs_dec is not None:
-            for layer_idx, intermediate_out in intermediate_outs_dec:
-                # we assume intermediate_out has the same length & padding
-                # as those of encoder_out
+        # # Decoder Intermediate CTC (optional)
+        # loss_interctc_dec = 0.0
+        # if self.interctc_weight_dec != 0.0 and intermediate_outs_dec is not None:
+        #     for layer_idx, intermediate_out in intermediate_outs_dec:
+        #         # we assume intermediate_out has the same length & padding
+        #         # as those of encoder_out
 
-                # use auxillary ctc data if specified
-                loss_ic = None
-                if self.aux_ctc is not None:
-                    idx_key = str(layer_idx)
-                    if idx_key in self.aux_ctc:
-                        aux_data_key = self.aux_ctc[idx_key]
-                        aux_data_tensor = kwargs.get(aux_data_key, None)
-                        aux_data_lengths = kwargs.get(aux_data_key + "_lengths", None)
+        #         # use auxillary ctc data if specified
+        #         loss_ic = None
+        #         if self.aux_ctc is not None:
+        #             idx_key = str(layer_idx)
+        #             if idx_key in self.aux_ctc:
+        #                 aux_data_key = self.aux_ctc[idx_key]
+        #                 aux_data_tensor = kwargs.get(aux_data_key, None)
+        #                 aux_data_lengths = kwargs.get(aux_data_key + "_lengths", None)
 
-                        if aux_data_tensor is not None and aux_data_lengths is not None:
-                            loss_ic, cer_ic = self._calc_ctc_loss(
-                                intermediate_out,
-                                decoder_out_lens,
-                                aux_data_tensor,
-                                aux_data_lengths,
-                            )
-                        else:
-                            raise Exception(
-                                "Aux. CTC tasks were specified but no data was found"
-                            )
-                if loss_ic is None:
-                    loss_ic, cer_ic = self._calc_ctc_loss(
-                        intermediate_out, decoder_out_lens, text, text_lengths
-                    ) 
-                loss_interctc_dec = loss_interctc_dec + loss_ic
+        #                 if aux_data_tensor is not None and aux_data_lengths is not None:
+        #                     loss_ic, cer_ic = self._calc_ctc_loss(
+        #                         intermediate_out,
+        #                         decoder_out_lens,
+        #                         aux_data_tensor,
+        #                         aux_data_lengths,
+        #                     )
+        #                 else:
+        #                     raise Exception(
+        #                         "Aux. CTC tasks were specified but no data was found"
+        #                     )
+        #         if loss_ic is None:
+        #             loss_ic, cer_ic = self._calc_ctc_loss(
+        #                 intermediate_out, decoder_out_lens, text, text_lengths
+        #             ) 
+        #         loss_interctc_dec = loss_interctc_dec + loss_ic
 
-                # Collect Intermedaite CTC stats
-                stats["loss_interctc_declayer{}".format(layer_idx)] = (
-                    loss_ic.detach() if loss_ic is not None else None
-                )
-                stats["cer_interctc_declayer{}".format(layer_idx)] = cer_ic
+        #         # Collect Intermedaite CTC stats
+        #         stats["loss_interctc_declayer{}".format(layer_idx)] = (
+        #             loss_ic.detach() if loss_ic is not None else None
+        #         )
+        #         stats["cer_interctc_declayer{}".format(layer_idx)] = cer_ic
 
-            loss_interctc_dec = loss_interctc_dec / len(intermediate_outs_dec)
+        #     loss_interctc_dec = loss_interctc_dec / len(intermediate_outs_dec)
 
         # calculate whole intermediate loss
-        loss = (
-            1 - self.interctc_weight_enc - self.interctc_weight_dec
-        ) * loss_ctc + self.interctc_weight_enc * loss_interctc_enc + self.interctc_weight_dec * loss_interctc_dec
+        loss = loss_ctc
 
         # Collect total loss stats
         stats["loss"] = loss.detach()

@@ -133,7 +133,7 @@ class StreamingMultiHeadedAttention(MultiHeadedAttention):
         n_batch = value.size(0)
 
         length = value.size(-2)
-        att_mask = torch.tril(torch.ones(length,length)).bool().to(value.device)
+        att_mask = torch.tril(torch.ones(length,length), diagonal=5).bool().to(value.device)
         min_value = torch.finfo(scores.dtype).min
         scores = scores.masked_fill(~att_mask[None,None,:,:], min_value)
 
