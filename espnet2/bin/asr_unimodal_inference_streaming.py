@@ -335,14 +335,14 @@ class Speech2TextStreaming:
                 is_final=is_final,
                 infer_mode=True,
             )
-
+ 
             if enc.shape[1]!=0:
                 if self.encbuffer is None:
                     self.encbuffer = enc
                 else:
                     self.encbuffer = torch.cat([self.encbuffer, enc], axis=1)
 
-                enc = self.encbuffer
+                # enc = self.encbuffer
                 enc, umalen, scalar_importance = self.asr_model.uma(enc, enclen)
                 enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
                 nbest_hyps = self.beam_search(

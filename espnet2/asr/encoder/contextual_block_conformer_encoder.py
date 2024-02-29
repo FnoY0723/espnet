@@ -4,7 +4,7 @@ Created on Sat Aug 21 17:27:16 2021.
 
 @author: Keqi Deng (UCAS)
 """
-
+import logging
 import math
 from typing import Optional, Tuple
 
@@ -547,7 +547,7 @@ class ContextualBlockConformerEncoder(AbsEncoder):
 
         # remove addin
         ys_chunk = ys_chunk.narrow(2, 1, self.block_size)
-
+        
         offset = self.block_size - self.look_ahead - self.hop_size
         if is_final:
             if n_processed_blocks == 0:
@@ -586,5 +586,8 @@ class ContextualBlockConformerEncoder(AbsEncoder):
                 "n_processed_blocks": n_processed_blocks + block_num,
                 "past_encoder_ctx": past_encoder_ctx,
             }
-
-        return ys_pad, None, next_states
+            logging.info(f'next_states: {next_states["n_processed_blocks"]}')
+        logging.info(f'ys_chunk: {ys_chunk[:,0,:,:].shape}')
+        logging.info(f'ys_pad: {ys_pad.shape}')
+        return ys_chunk[:,0,:,:], None, next_states
+        return ys_pad, None, next_states()
