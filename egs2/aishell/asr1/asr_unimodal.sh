@@ -97,7 +97,7 @@ asr_stats_dir= # Specify the directory path for ASR statistics.
 asr_config=    # Config for asr model training.
 asr_args=      # Arguments for asr model training, e.g., "--max_epoch 10".
                # Note that it will overwrite args in asr config.
-pretrained_model=              # Pretrained model to load
+pretrained_model=./exp_streaming_uma_conformer_0222/asr_train_asr_streaming_uma_conformer_raw_zh_char_sp/valid.cer.ave_10best.pth              # Pretrained model to load
 ignore_init_mismatch=false      # Ignore initial mismatch
 feats_normalize=global_mvn # Normalizaton layer type.
 num_splits_asr=1           # Number of splitting for lm corpus.
@@ -1436,7 +1436,7 @@ if [ ${stage} -le 12 ] && [ ${stop_stage} -ge 12 ] && ! [[ " ${skip_stages} " =~
     mkdir -p "${asr_exp}/${inference_tag}"; echo "${run_args} --stage 12 \"\$@\"; exit \$?" > "${asr_exp}/${inference_tag}/run.sh"; chmod +x "${asr_exp}/${inference_tag}/run.sh"
 
     inference_bin_tag=""
-    if [ ${asr_task} == "asr_unimodal" ]; then
+    if [ ${asr_task} == "asr" ]; then
         if "${use_k2}"; then
             # Now only _nj=1 is verified if using k2
             inference_bin_tag="_k2"

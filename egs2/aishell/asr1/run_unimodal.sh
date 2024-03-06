@@ -3,7 +3,7 @@
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 17:30:10
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-02-22 14:42:17
+ # @LastEditTime: 2024-03-06 10:03:19
  # @FilePath: /espnet/egs2/aishell/asr1/run_unimodal.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 

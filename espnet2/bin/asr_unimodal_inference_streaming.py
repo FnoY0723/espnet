@@ -211,9 +211,13 @@ class Speech2TextStreaming:
         self.reset()
 
     def reset(self):
-        self.encbuffer = None
+        self.encbuf = None
+        self.encbuff = None
         self.frontend_states = None
         self.encoder_states = None
+        self.umabuffer = None
+        self.lastlen = 0
+        self.lastlastlen = 0
         # self.beam_search.reset()
 
     def apply_frontend(
@@ -337,14 +341,50 @@ class Speech2TextStreaming:
             )
  
             if enc.shape[1]!=0:
-                if self.encbuffer is None:
-                    self.encbuffer = enc
+                if self.encbuf is None:
+                    self.encbuf = enc
                 else:
-                    self.encbuffer = torch.cat([self.encbuffer, enc], axis=1)
+                    self.encbuf = torch.cat([self.encbuf, enc], axis=1)
+                enc = self.encbuf
+                uma_out, umalen, _ = self.asr_model.uma(enc, enclen, self.encoder_states)
+                # if self.umabuffer is None:
+                #     self.umabuffer = uma_out
+                # else:
+                #     self.umabuffer = torch.cat([self.umabuffer, uma_out], axis=1)
+                # uma_out = self.umabuffer
+                # umalen = [self.umabuffer.shape[1],]
 
-                # enc = self.encbuffer
-                enc, umalen, scalar_importance = self.asr_model.uma(enc, enclen)
-                enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
+                enc, _ = self.asr_model.decoder(uma_out, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
+                logging.info(f'after decoder: {enc.shape[1]}')
+                # if self.lastlen != 0:
+                #     enc = enc[:,self.lastlen:,:]
+                #     self.encbuff = torch.cat([self.encbuff, enc], axis=1)
+                # else:
+                #     self.encbuff = enc
+                # self.lastlen = self.encbuff.shape[1]
+                # enc = self.encbuff
+
+                # nowlen = enc.shape[1]
+                # logging.info(f'lastlastlen: {self.lastlastlen}, lastlen: {self.lastlen}')
+                # if self.encbuff is not None:
+                #     if is_final:
+                #         enc = enc[:,self.lastlastlen:,:]
+                #     else:
+                #         enc = enc[:,self.lastlastlen:self.lastlen,:]
+
+                # if self.encoder_states is not None:
+                #     if self.encoder_states["n_processed_blocks"]==1 or self.encoder_states["n_processed_blocks"]==2:
+                #         self.encbuff = enc
+                #     else:
+                #         self.encbuff = torch.cat([self.encbuff, enc], axis=1)
+                # else:
+                #     self.encbuff = torch.cat([self.encbuff, enc], axis=1)
+              
+                # enc = self.encbuff
+                # self.lastlastlen = self.lastlen
+                # self.lastlen = nowlen
+
+                # logging.info(f'before beam search: {enc.shape}, {umalen}')
                 nbest_hyps = self.beam_search(
                     x=enc[0],
                     maxlenratio=self.maxlenratio,

@@ -130,7 +130,7 @@ class BatchBeamSearchOnline(BatchBeamSearch):
         if maxlenratio == 0:
             maxlen = x.shape[0]
         else:
-            maxlen = max(1, int(maxlenratio * x.size(0)))
+            maxlen = max(1, int(maxlenratio * x.size(0))+1)
 
         ret = None
         while True:
@@ -170,6 +170,8 @@ class BatchBeamSearchOnline(BatchBeamSearch):
 
             if self.running_hyps is None:
                 self.running_hyps = self.init_hyp(h)
+
+            logging.info(f'running_hyps: {len(self.running_hyps)}, h: {h.shape}')
             ret = self.process_one_block(h, block_is_final, maxlen, maxlenratio)
             logging.debug("Finished processing block: %d", self.processed_block)
             self.processed_block += 1

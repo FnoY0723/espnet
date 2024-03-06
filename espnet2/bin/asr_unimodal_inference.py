@@ -396,7 +396,7 @@ class Speech2Text:
         # logging.info(str(enc))
 
         # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0))
-        enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
+        enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc, scalar_importance)
         # Normal ASR
         if isinstance(enc, tuple):
             enc = enc[0]

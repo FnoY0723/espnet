@@ -111,6 +111,98 @@ class MultiHeadedAttention(nn.Module):
         return self.forward_attention(v, scores, mask)
 
 
+class ChunkMultiHeadedAttention(MultiHeadedAttention):
+
+    def __init__(self, n_head, n_feat, dropout_rate):
+        """Construct an RelPositionMultiHeadedAttention object."""
+        super().__init__(n_head, n_feat, dropout_rate)
+
+    def chunk_forward_attention(self, value, scores, mask, chunk_counts=None):
+        """Compute attention context vector.
+
+        Args:
+            value (torch.Tensor): Transformed value (#batch, n_head, time2, d_k).
+            scores (torch.Tensor): Attention score (#batch, n_head, time1, time2).
+            mask (torch.Tensor): Mask (#batch, 1, time2) or (#batch, time1, time2).
+
+        Returns:
+            torch.Tensor: Transformed value (#batch, time1, d_model)
+                weighted by the attention score (#batch, time1, time2).
+
+        """
+        n_batch = value.size(0)
+
+        length = value.size(-2)
+
+        if chunk_counts is not None:
+            # logging.info(f"chunk_counts: {chunk_counts}")
+            counts = chunk_counts.sum(-1)
+            offset = length - counts
+            # logging.info(f"offset: {offset}")
+            chunk_counts = torch.cat([chunk_counts, offset.view(n_batch, 1)], dim=-1)
+            # logging.info(f"chunk_counts: {chunk_counts[0]}")
+            csum = torch.cumsum(chunk_counts, dim=-1)
+            csum[:, -1] = 0
+            # logging.info(f"csum: {csum[0]}")
+            chunk_counts = chunk_counts.flatten()
+            csum = csum.flatten()
+
+            repeats = torch.repeat_interleave(csum,chunk_counts).view(n_batch, -1)
+            org = torch.arange(length).repeat(n_batch, length, 1).to(value.device)
+            att_mask = org < repeats.unsqueeze(-1)
+            logging.info(f"att_mask: {att_mask[0]}")
+
+            min_value = torch.finfo(scores.dtype).min
+            scores = scores.masked_fill(~att_mask[:,None,:,:], min_value)
+            # logging.info(f"scores: {scores[0,0,:,:]}")
+
+        if mask is not None:
+            mask = mask.unsqueeze(1).eq(0)  # (batch, 1, *, time2)
+            # logging.info(f"mask: {mask[0,0,:,:]}")
+        #     min_value = torch.finfo(scores.dtype).min
+        #     scores = scores.masked_fill(mask, min_value)
+            # logging.info(f"scores: {scores[0,0,:,:]}")
+            self.attn = torch.softmax(scores, dim=-1).masked_fill(
+                mask, 0.0
+            )  # (batch, head, time1, time2)
+        else:
+            self.attn = torch.softmax(scores, dim=-1)  # (batch, head, time1, time2)
+        
+        # logging.info(f"self.attn: {self.attn[0,0,:,:]}")
+        
+        # length = value.size(-2)
+        # att_mask = torch.tril(torch.ones(length,length)).unsqueeze(0).unsqueeze(0).to(value.device)
+        # self.attn = self.attn * att_mask
+        p_attn = self.dropout(self.attn)
+        # logging.info(p_attn[0,0,:,:])
+        # logging.info(p_attn.shape)
+
+        x = torch.matmul(p_attn, value)  # (batch, head, time 1, d_k)
+        x = (
+            x.transpose(1, 2).contiguous().view(n_batch, -1, self.h * self.d_k)
+        )  # (batch, time1, d_model)
+
+        return self.linear_out(x)  # (batch, time1, d_model)
+
+    def forward(self, query, key, value, mask, chunk_counts=None):
+        """Compute scaled dot product attention.
+
+        Args:
+            query (torch.Tensor): Query tensor (#batch, time1, size).
+            key (torch.Tensor): Key tensor (#batch, time2, size).
+            value (torch.Tensor): Value tensor (#batch, time2, size).
+            mask (torch.Tensor): Mask tensor (#batch, 1, time2) or
+                (#batch, time1, time2).
+
+        Returns:
+            torch.Tensor: Output tensor (#batch, time1, d_model).
+
+        """
+        q, k, v = self.forward_qkv(query, key, value)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
+        return self.chunk_forward_attention(v, scores, mask, chunk_counts)
+
+
 class StreamingMultiHeadedAttention(MultiHeadedAttention):
 
     def __init__(self, n_head, n_feat, dropout_rate):
@@ -133,7 +225,7 @@ class StreamingMultiHeadedAttention(MultiHeadedAttention):
         n_batch = value.size(0)
 
         length = value.size(-2)
-        att_mask = torch.tril(torch.ones(length,length), diagonal=5).bool().to(value.device)
+        att_mask = torch.tril(torch.ones(length,length), diagonal=0).bool().to(value.device)
         min_value = torch.finfo(scores.dtype).min
         scores = scores.masked_fill(~att_mask[None,None,:,:], min_value)
 

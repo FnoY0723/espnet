@@ -586,8 +586,8 @@ class ContextualBlockConformerEncoder(AbsEncoder):
                 "n_processed_blocks": n_processed_blocks + block_num,
                 "past_encoder_ctx": past_encoder_ctx,
             }
-            logging.info(f'next_states: {next_states["n_processed_blocks"]}')
-        logging.info(f'ys_chunk: {ys_chunk[:,0,:,:].shape}')
-        logging.info(f'ys_pad: {ys_pad.shape}')
-        return ys_chunk[:,0,:,:], None, next_states
-        return ys_pad, None, next_states()
+
+        # logging.info(f'ys_chunk: {ys_chunk[:,0,:,:].shape}')
+        # logging.info(f'ys_pad: {ys_pad.shape}')
+        # return ys_chunk[:,0,:,:], None, next_states
+        return ys_pad, None, next_states
