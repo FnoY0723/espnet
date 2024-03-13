@@ -353,7 +353,10 @@ class Speech2Text:
         batch = to_device(batch, device=self.device)
 
         # b. Forward Encoder
+        # self.asr_model.encoder.look_ahead = 8
+        # self.asr_model.encoder.block_size = 32
         enc_before, enclen = self.asr_model.encode(**batch)
+        logging.info(f'{self.asr_model.encoder.look_ahead}')
         if isinstance(enc_before, tuple):
             enc_before = enc_before[0]
         enc_out_length.append(enc_before.size(1))
@@ -365,7 +368,8 @@ class Speech2Text:
             plt.imshow(enc_before[0]-enc_before[0].mean(),cmap='coolwarm',aspect="auto")
             plt.xlim(0,enc_before.shape[1]-1)
 
-        enc, umalen, scalar_importance = self.asr_model.uma(enc_before, enclen)
+        # enc, umalen, (chunk_counts,scalar_importance) = self.asr_model.uma(enc_before, enclen)
+        enc, umalen, chunk_counts = self.asr_model.uma(enc_before, enclen)
         # logging.info(f'gaussian_w: {self.asr_model.uma.gaussian_w} gaussian_b: {self.asr_model.uma.gaussian_b}')
         # logging.info(self.asr_model.uma.linear_sigmoid[0].state_dict())
 
@@ -373,19 +377,21 @@ class Speech2Text:
             plt.subplot(spec[2])
             alpha0 = scalar_importance[0].squeeze()
             plt.plot(alpha0, color='cyan',linewidth=2)
-            plt.ylim(0,max(alpha0)+1)
+            plt.vlines(scalar_importance[1], 0, 1, linestyles='dashed', colors='red')
+            plt.ylim(0,1)
+            # plt.ylim(0,max(alpha0)+1)
             plt.xlim(0,alpha0.shape[0]-1)
-
-            plt.subplot(spec[3])
-            # 自相关attention map
-            # scores = torch.matmul(enc_before[0], enc_before[0].transpose(-2, -1)) / math.sqrt(256)
-            # attn = torch.softmax(scores, dim=-1)  # (batch, head, time1, time2)
-            # alpha1 = attn.squeeze()
-            # qk attention map
-            alpha1 = scalar_importance[1].squeeze()
-            plt.imshow(alpha1, aspect="auto")
-            plt.xlim(0, alpha1.shape[0]-1)
-            image_dir = "./inferce_uma_images_0111"
+           
+            # plt.subplot(spec[3])
+            # # 自相关attention map
+            # # scores = torch.matmul(enc_before[0], enc_before[0].transpose(-2, -1)) / math.sqrt(256)
+            # # attn = torch.softmax(scores, dim=-1)  # (batch, head, time1, time2)
+            # # alpha1 = attn.squeeze()
+            # # qk attention map
+            # alpha1 = scalar_importance[1].squeeze()
+            # plt.imshow(alpha1, aspect="auto")
+            # plt.xlim(0, alpha1.shape[0]-1)
+            image_dir = "./uma_chunk_finetune_images_0308"
             if not os.path.exists(image_dir):
                 os.makedirs(image_dir)
             plt.savefig(os.path.join(image_dir,f'hyp_{self.k}.png'))
@@ -396,7 +402,7 @@ class Speech2Text:
         # logging.info(str(enc))
 
         # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0))
-        enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc, scalar_importance)
+        enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc, chunk_counts)
         # Normal ASR
         if isinstance(enc, tuple):
             enc = enc[0]

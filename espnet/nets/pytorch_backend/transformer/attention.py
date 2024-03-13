@@ -134,6 +134,9 @@ class ChunkMultiHeadedAttention(MultiHeadedAttention):
 
         length = value.size(-2)
 
+        if chunk_counts is None:
+            logging.info(f'chunk_counts is None!')
+            
         if chunk_counts is not None:
             # logging.info(f"chunk_counts: {chunk_counts}")
             counts = chunk_counts.sum(-1)
@@ -150,7 +153,7 @@ class ChunkMultiHeadedAttention(MultiHeadedAttention):
             repeats = torch.repeat_interleave(csum,chunk_counts).view(n_batch, -1)
             org = torch.arange(length).repeat(n_batch, length, 1).to(value.device)
             att_mask = org < repeats.unsqueeze(-1)
-            logging.info(f"att_mask: {att_mask[0]}")
+            # logging.info(f"att_mask: {att_mask[0]}")
 
             min_value = torch.finfo(scores.dtype).min
             scores = scores.masked_fill(~att_mask[:,None,:,:], min_value)
