@@ -23,40 +23,16 @@ from espnet2.asr.decoder.transformer_decoder import (
     TransformerDecoder,
 )
 from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
-from espnet2.asr.encoder.abs_encoder import AbsEncoder
-from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
-from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
-from espnet2.asr.encoder.contextual_block_conformer_encoder import (
-    ContextualBlockConformerEncoder,
-)
-from espnet2.asr.encoder.contextual_block_transformer_encoder import (
-    ContextualBlockTransformerEncoder,
-)
-from espnet2.asr.encoder.e_branchformer_condition_encoder import EBranchformerEncoder
-from espnet2.asr.encoder.hubert_encoder import (
-    FairseqHubertEncoder,
-    FairseqHubertPretrainEncoder,
-    TorchAudioHuBERTPretrainEncoder,
-)
-from espnet2.asr.encoder.longformer_encoder import LongformerEncoder
-from espnet2.asr.encoder.rnn_encoder import RNNEncoder
-from espnet2.asr.encoder.transformer_encoder import TransformerEncoder
-from espnet2.asr.encoder.transformer_encoder_multispkr import (
-    TransformerEncoder as TransformerEncoderMultiSpkr,
-)
-from espnet2.asr.encoder.vgg_rnn_encoder import VGGRNNEncoder
-from espnet2.asr.encoder.wav2vec2_encoder import FairSeqWav2Vec2Encoder
-from espnet2.asr.encoder.whisper_encoder import OpenAIWhisperEncoder
 from espnet2.asr.encoder.mamba_encoder import MambaEncoder
-from espnet2.asr.espnet_model import ESPnetASRModel
+from espnet2.asr.encoder.mamba_minimal_encoder import MambaMinimalEncoder
+from espnet2.asr.mamba_espnet_model import MambaESPnetASRModel
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.default import DefaultFrontend
 from espnet2.asr.frontend.fused import FusedFrontends
 from espnet2.asr.frontend.s3prl import S3prlFrontend
 from espnet2.asr.frontend.whisper import WhisperFrontend
 from espnet2.asr.frontend.windowing import SlidingWindow
-from espnet2.asr.maskctc_model import MaskCTCModel
-from espnet2.asr.pit_espnet_model import ESPnetASRModel as PITESPnetModel
+
 from espnet2.asr.postencoder.abs_postencoder import AbsPostEncoder
 from espnet2.asr.postencoder.hugging_face_transformers_postencoder import (
     HuggingFaceTransformersPostEncoder,
@@ -120,12 +96,10 @@ normalize_choices = ClassChoices(
 model_choices = ClassChoices(
     "model",
     classes=dict(
-        espnet=ESPnetASRModel,
-        maskctc=MaskCTCModel,
-        pit_espnet=PITESPnetModel,
+        mamba_espnet=MambaESPnetASRModel,
     ),
     type_check=AbsESPnetModel,
-    default="espnet",
+    default="mamba_espnet",
 )
 preencoder_choices = ClassChoices(
     name="preencoder",
@@ -140,25 +114,11 @@ preencoder_choices = ClassChoices(
 encoder_choices = ClassChoices(
     "encoder",
     classes=dict(
-        conformer=ConformerEncoder,
-        transformer=TransformerEncoder,
-        transformer_multispkr=TransformerEncoderMultiSpkr,
-        contextual_block_transformer=ContextualBlockTransformerEncoder,
-        contextual_block_conformer=ContextualBlockConformerEncoder,
-        vgg_rnn=VGGRNNEncoder,
-        rnn=RNNEncoder,
-        wav2vec2=FairSeqWav2Vec2Encoder,
-        hubert=FairseqHubertEncoder,
-        hubert_pretrain=FairseqHubertPretrainEncoder,
-        torchaudiohubert=TorchAudioHuBERTPretrainEncoder,
-        longformer=LongformerEncoder,
-        branchformer=BranchformerEncoder,
-        whisper=OpenAIWhisperEncoder,
-        e_branchformer=EBranchformerEncoder,
         mamba=MambaEncoder,
+        mamba_minimal=MambaMinimalEncoder,
     ),
-    type_check=AbsEncoder,
-    default="rnn",
+    # type_check=AbsEncoder,
+    default="mamba",
 )
 postencoder_choices = ClassChoices(
     name="postencoder",
@@ -475,7 +435,7 @@ class ASRTask(AbsTask):
         return retval
 
     @classmethod
-    def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel:
+    def build_model(cls, args: argparse.Namespace) -> MambaESPnetASRModel:
         assert check_argument_types()
         if isinstance(args.token_list, str):
             with open(args.token_list, encoding="utf-8") as f:
@@ -537,6 +497,7 @@ class ASRTask(AbsTask):
         else:
             preencoder = None
 
+        # 4.1. Pre-encoder output block
         # 4. Encoder
         encoder_class = encoder_choices.get_class(args.encoder)
         encoder = encoder_class(input_size=input_size, **args.encoder_conf)

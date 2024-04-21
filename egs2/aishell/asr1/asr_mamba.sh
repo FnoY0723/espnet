@@ -35,11 +35,11 @@ skip_upload_hf=true  # Skip uploading to hugging face stages.
 eval_valid_set=false # Run decoding for the validation set
 ngpu=1               # The number of gpus ("0" uses cpu, otherwise use gpu).
 num_nodes=1          # The number of nodes.
-nj=32                # The number of parallel jobs.
-inference_nj=32      # The number of parallel jobs in decoding.
-gpu_inference=false  # Whether to perform gpu decoding.
+nj=64                # The number of parallel jobs.
+inference_nj=64      # The number of parallel jobs in decoding.
+gpu_inference=true  # Whether to perform gpu decoding.
 dumpdir=dump         # Directory to dump features.
-expdir=exp_uma_44_32_70           # Directory to save experiments.
+expdir=exp_ctc_44_32_60   # Directory to save experiments.
 python=python3       # Specify python to execute espnet commands.
 
 # Data preparation related
@@ -75,7 +75,7 @@ ngram_exp=
 ngram_num=3
 
 # Language model related
-use_lm=true       # Use language model for ASR decoding.
+use_lm=false       # Use language model for ASR decoding.
 lm_tag=           # Suffix to the result dir for language model training.
 lm_exp=           # Specify the directory path for LM experiment.
                   # If this option is specified, lm_tag is ignored.
@@ -89,7 +89,7 @@ num_splits_lm=1   # Number of splitting for lm corpus.
 word_vocab_size=10000 # Size of word vocabulary.
 
 # ASR model related
-asr_task=asr_unimodal   # ASR task mode. Either 'asr' or 'asr_transducer'.
+asr_task=asr_mamba   # ASR task mode. Either 'asr' or 'asr_transducer'.
 asr_tag=       # Suffix to the result dir for asr model training.
 asr_exp=       # Specify the directory path for ASR experiment.
                # If this option is specified, asr_tag is ignored.
@@ -97,9 +97,10 @@ asr_stats_dir= # Specify the directory path for ASR statistics.
 asr_config=    # Config for asr model training.
 asr_args=      # Arguments for asr model training, e.g., "--max_epoch 10".
                # Note that it will overwrite args in asr config.
-pretrained_model= #./exp_streaming_uma_conformer_0222/asr_train_asr_streaming_uma_conformer_raw_zh_char_sp/valid.cer.ave_10best.pth              # Pretrained model to load
+pretrained_model=              # Pretrained model to load
 ignore_init_mismatch=false      # Ignore initial mismatch
 feats_normalize=global_mvn # Normalizaton layer type.
+# feats_normalize=utterance_mvn
 num_splits_asr=1           # Number of splitting for lm corpus.
 num_ref=1   # Number of references for training.
             # In supervised learning based speech enhancement / separation, it is equivalent to number of speakers.
@@ -131,7 +132,7 @@ inference_args=   # Arguments for decoding, e.g., "--lm_weight 0.1".
                   # Note that it will overwrite args in inference config.
 inference_lm=valid.loss.ave.pth       # Language model path for decoding.
 inference_ngram=${ngram_num}gram.bin
-inference_asr_model=20epoch.pth # ASR model path for decoding.
+inference_asr_model=valid.cer_ctc.ave_10best.pth # ASR model path for decoding.
                                       # e.g.
                                       # inference_asr_model=train.loss.best.pth
                                       # inference_asr_model=3epoch.pth
@@ -1509,7 +1510,7 @@ if [ ${stage} -le 12 ] && [ ${stop_stage} -ge 12 ] && ! [[ " ${skip_stages} " =~
                 ${_opts} ${inference_args} || { cat $(grep -l -i error "${_logdir}"/asr_inference.*.log) ; exit 1; }
 
         # 3. Calculate and report RTF based on decoding logs
-        if [ ${asr_task} == "asr_unimodal" ] && [ -z ${inference_bin_tag} ]; then
+        if [ ${asr_task} == "asr" ] && [ -z ${inference_bin_tag} ]; then
             log "Calculating RTF & latency... log: '${_logdir}/calculate_rtf.log'"
             rm -f "${_logdir}"/calculate_rtf.log
             _fs=$(python3 -c "import humanfriendly as h;print(h.parse_size('${fs}'))")

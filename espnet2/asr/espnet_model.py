@@ -6,7 +6,6 @@ import torch
 from packaging.version import parse as V
 from typeguard import check_argument_types
 
-from espnet2.asr.uma import UMA
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
@@ -14,7 +13,7 @@ from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.postencoder.abs_postencoder import AbsPostEncoder
 from espnet2.asr.preencoder.abs_preencoder import AbsPreEncoder
 from espnet2.asr.specaug.abs_specaug import AbsSpecAug
-from espnet2.asr.transducer.error_calculator import ErrorCalculatorTransducer 
+from espnet2.asr.transducer.error_calculator import ErrorCalculatorTransducer
 from espnet2.asr_transducer.utils import get_transducer_task_io
 from espnet2.layers.abs_normalize import AbsNormalize
 from espnet2.torch_utils.device_funcs import force_gatherable
@@ -187,8 +186,6 @@ class ESPnetASRModel(AbsESPnetModel):
             self.ctc = None
         else:
             self.ctc = ctc
-        
-        # self.uma = UMA(256, 256)
 
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
 
@@ -213,6 +210,7 @@ class ESPnetASRModel(AbsESPnetModel):
         **kwargs,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
         """Frontend + Encoder + Decoder + Calc loss
+
         Args:
             speech: (Batch, Length, ...)
             speech_lengths: (Batch, )
@@ -237,8 +235,6 @@ class ESPnetASRModel(AbsESPnetModel):
 
         # 1. Encoder
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
-        # encoder_out, encoder_out_lens = self.uma(encoder_out, encoder_out_lens)
-
         intermediate_outs = None
         if isinstance(encoder_out, tuple):
             intermediate_outs = encoder_out[1]
@@ -372,6 +368,7 @@ class ESPnetASRModel(AbsESPnetModel):
         self, speech: torch.Tensor, speech_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Frontend + Encoder. Note that this method is used by asr_inference.py
+
         Args:
             speech: (Batch, Length, ...)
             speech_lengths: (Batch, )
@@ -395,7 +392,9 @@ class ESPnetASRModel(AbsESPnetModel):
         # 4. Forward encoder
         # feats: (Batch, Length, Dim)
         # -> encoder_out: (Batch, Length2, Dim2)
-        if self.encoder.interctc_use_conditioning:
+        if self.encoder.interctc_use_conditioning or getattr(
+            self.encoder, "ctc_trim", False
+        ):
             encoder_out, encoder_out_lens, _ = self.encoder(
                 feats, feats_lengths, ctc=self.ctc
             )
@@ -457,7 +456,9 @@ class ESPnetASRModel(AbsESPnetModel):
         ys_pad_lens: torch.Tensor,
     ) -> torch.Tensor:
         """Compute negative log likelihood(nll) from transformer-decoder
+
         Normally, this function is called in batchify_nll.
+
         Args:
             encoder_out: (Batch, Length, Dim)
             encoder_out_lens: (Batch,)
@@ -494,6 +495,7 @@ class ESPnetASRModel(AbsESPnetModel):
         batch_size: int = 100,
     ):
         """Compute negative log likelihood(nll) from transformer-decoder
+
         To avoid OOM, this fuction seperate the input into batches.
         Then call nll for each batch and combine and return results.
         Args:
@@ -597,14 +599,17 @@ class ESPnetASRModel(AbsESPnetModel):
         labels: torch.Tensor,
     ):
         """Compute Transducer loss.
+
         Args:
             encoder_out: Encoder output sequences. (B, T, D_enc)
             encoder_out_lens: Encoder output sequences lengths. (B,)
             labels: Label ID sequences. (B, L)
+
         Return:
             loss_transducer: Transducer loss value.
             cer_transducer: Character error rate for Transducer.
             wer_transducer: Word Error Rate for Transducer.
+
         """
         decoder_in, target, t_len, u_len = get_transducer_task_io(
             labels,

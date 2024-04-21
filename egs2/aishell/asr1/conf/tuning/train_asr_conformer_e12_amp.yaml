@@ -1,14 +1,44 @@
 # network architecture
 # encoder related
-encoder: mamba
-encoder_conf:
-    d_model: 256
-    n_layer: 12
-    norm_epsilon: 1e-5
-    rms_norm: False
-    fused_add_norm: False
-    residual_in_fp32: False
+# encoder: conformer
+# encoder_conf:
+#     output_size: 256    # dimension of attention
+#     attention_heads: 4
+#     linear_units: 2048  # the number of units of position-wise feed forward
+#     num_blocks: 12      # the number of encoder blocks
+#     dropout_rate: 0.1
+#     positional_dropout_rate: 0.1
+#     attention_dropout_rate: 0.1
+#     input_layer: conv2d # encoder architecture type
+#     normalize_before: true
+#     rel_pos_type: latest
+#     pos_enc_layer_type: rel_pos
+#     selfattention_layer_type: rel_selfattn
+#     activation_type: swish
+#     macaron_style: true
+#     use_cnn_module: true
+#     cnn_module_kernel: 31
 
+encoder: conformer_chunk
+encoder_conf:
+    output_size: 256    # dimension of attention
+    attention_heads: 4
+    linear_units: 2048  # the number of units of position-wise feed forward
+    num_blocks: 12      # the number of encoder blocks
+    dropout_rate: 0.1
+    positional_dropout_rate: 0.1
+    attention_dropout_rate: 0.1
+    input_layer:  conv2d # encoder architecture type causal_conv2d
+    normalize_before: true
+    rel_pos_type: latest
+    pos_enc_layer_type: rel_pos
+    selfattention_layer_type: rel_selfattn
+    activation_type: swish
+    macaron_style: true
+    use_cnn_module: true
+    cnn_module_kernel: 8
+    chunk_size: 16      # streaming configuration
+    
 # decoder related
 decoder: transformer
 decoder_conf:
@@ -30,7 +60,7 @@ model_conf:
 # batch_type: numel
 # batch_bins: 25000000
 batch_type: folded
-batch_size: 64
+batch_size: 128
 
 # optimization related
 accum_grad: 1
@@ -38,17 +68,24 @@ grad_clip: 5
 max_epoch: 60
 val_scheduler_criterion:
     - valid
-    - acc
+    - loss_ctc
 best_model_criterion:
 -   - valid
-    - acc
-    - max
+    - cer_ctc
+    - min
+# val_scheduler_criterion:
+#     - valid
+#     - acc
+# best_model_criterion:
+# -   - valid
+#     - acc
+#     - max
 keep_nbest_models: 10
 
 optim: adam
 optim_conf:
    lr: 0.001
-   weight_decay: 0.000001
+   weight_decay: 0.00001
 scheduler: warmuplr
 scheduler_conf:
    warmup_steps: 35000

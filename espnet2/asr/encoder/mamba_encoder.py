@@ -1,55 +1,38 @@
 # Copyright 2019 Shigeki Karita
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
-
-"""Transformer encoder definition."""
-
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
+import torch.nn as nn
 from typeguard import check_argument_types
 
 from espnet2.asr.ctc import CTC
-from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
-from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
 from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
-from espnet.nets.pytorch_backend.transformer.encoder_layer import EncoderLayer
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
-from espnet.nets.pytorch_backend.transformer.multi_layer_conv import (
-    Conv1dLinear,
-    MultiLayeredConv1d,
-)
-from espnet.nets.pytorch_backend.transformer.positionwise_feed_forward import (
-    PositionwiseFeedForward,
-)
+
 from espnet.nets.pytorch_backend.transformer.repeat import repeat
 from espnet.nets.pytorch_backend.transformer.subsampling import (
     Conv2dSubsampling,
-    Conv2dSubsampling1,
-    Conv2dSubsampling2,
-    Conv2dSubsampling6,
-    Conv2dSubsampling8,
     TooShortUttError,
     check_short_utt,
 )
 
+import logging
 import math
 from functools import partial
-import json
-import os
 
-from collections import namedtuple
+import torch
+import torch.nn as nn
 
-from espnet2.asr.mamba_ssm.models.config_mamba import MambaConfig
 from espnet2.asr.mamba_ssm.modules.mamba_simple import Mamba, Block
-from espnet2.asr.mamba_ssm.utils.generation import GenerationMixin
-from espnet2.asr.mamba_ssm.utils.hf import load_config_hf, load_state_dict_hf
 
 try:
     from espnet2.asr.mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
 except ImportError:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
+from dataclasses import dataclass, field
 
 def create_block(
     d_model,
@@ -67,7 +50,7 @@ def create_block(
     factory_kwargs = {"device": device, "dtype": dtype}
     mixer_cls = partial(Mamba, layer_idx=layer_idx, **ssm_cfg, **factory_kwargs)
     norm_cls = partial(
-        torch.nn.LayerNorm if not rms_norm else RMSNorm, eps=norm_epsilon, **factory_kwargs
+        nn.LayerNorm if not rms_norm else RMSNorm, eps=norm_epsilon, **factory_kwargs
     )
     block = Block(
         d_model,
@@ -88,12 +71,12 @@ def _init_weights(
     rescale_prenorm_residual=True,
     n_residuals_per_layer=1,  # Change to 2 if we have MLP
 ):
-    if isinstance(module, torch.nn.Linear):
+    if isinstance(module, nn.Linear):
         if module.bias is not None:
             if not getattr(module.bias, "_no_reinit", False):
-                torch.nn.init.zeros_(module.bias)
-    elif isinstance(module, torch.nn.Embedding):
-        torch.nn.init.normal_(module.weight, std=initializer_range)
+                nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.Embedding):
+        nn.init.normal_(module.weight, std=initializer_range)
 
     if rescale_prenorm_residual:
         # Reinitialize selected weights subject to the OpenAI GPT-2 Paper Scheme:
@@ -108,12 +91,102 @@ def _init_weights(
                 # Following Pytorch init, except scale by 1/sqrt(2 * n_layer)
                 # We need to reinit p since this code could be called multiple times
                 # Having just p *= scale would repeatedly scale it down
-                torch.nn.init.kaiming_uniform_(p, a=math.sqrt(5))
+                nn.init.kaiming_uniform_(p, a=math.sqrt(5))
                 with torch.no_grad():
                     p /= math.sqrt(n_residuals_per_layer * n_layer)
 
 
-class MambaEncoder(torch.nn.Module):
+class CausalConv1dSubsampling(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, bias=True):
+        super(CausalConv1dSubsampling, self).__init__()
+        self.padding = (kernel_size - 1)
+
+        self.subsample1 = nn.Sequential(
+            nn.Conv1d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+                bias=bias,
+            ),
+            nn.ReLU(),
+        )
+
+        self.subsample2 = nn.Sequential(
+            nn.Conv1d(
+                out_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+                # groups=out_channels,
+                bias=bias,
+            ),
+            nn.ReLU(),
+        )
+
+    def forward(self, x, x_mask):
+        x = x.transpose(1, 2)
+        x = self.subsample1(x)
+        if self.padding != 0:
+            x = x[:, :, :-self.padding]
+        x = self.subsample2(x)
+        if self.padding != 0:
+            x = x[:, :, :-self.padding]
+        x = x.transpose(1, 2)
+        if x_mask is None:
+            return x, None
+        return x, x_mask[:, :, :-2:2][:, :, :-2:2]
+
+
+class CausalConv2dSubsampling(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, bias=True):
+        super(CausalConv2dSubsampling, self).__init__()
+        self.padding = (kernel_size[0] - 1, 0) 
+
+        self.subsample1 = nn.Sequential(
+            nn.Conv2d(
+                1, 
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+                bias=bias,
+            ),
+            nn.ReLU(),
+        )
+
+        self.subsample2 = nn.Sequential(
+            nn.Conv2d(
+                out_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+                bias=bias,
+            ),
+            nn.ReLU(),
+        )
+
+        self.out = torch.nn.Linear(out_channels * (((in_channels - 1) // 2 - 1) // 2), out_channels)
+
+    def forward(self, x, x_mask):
+        x = x.unsqueeze(1)  # (b, c, t, f)
+        x = self.subsample1(x)
+        if self.padding[0] != 0:
+            x = x[:, :, :-self.padding[0], :]
+        x = self.subsample2(x)
+        if self.padding[0] != 0:
+            x = x[:, :, :-self.padding[0], :]
+        b, c, t, f = x.size()
+        x = self.out(x.transpose(1, 2).contiguous().view(b, t, c * f))
+        if x_mask is None:
+            return x, None
+        return x, x_mask[:, :, :-2:2][:, :, :-2:2]
+
+
+class MambaEncoder(nn.Module):
     """Transformer encoder module.
 
     Args:
@@ -122,14 +195,14 @@ class MambaEncoder(torch.nn.Module):
 
     def __init__(
         self,
-        input_size: int,   # d_model
+        input_size: int,
         output_size: int = 256,
         num_blocks: int = 6,
         dropout_rate: float = 0.1,
         positional_dropout_rate: float = 0.1,
         input_layer: Optional[str] = "conv2d",
         pos_enc_class=PositionalEncoding,
-        normalize_before: bool = False,
+        normalize_before: bool = True,
         padding_idx: int = -1,
         ssm_cfg=None,
         norm_epsilon: float = 1e-5,
@@ -143,8 +216,14 @@ class MambaEncoder(torch.nn.Module):
         assert check_argument_types()
         super().__init__()
         self._output_size = output_size
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.residual_in_fp32 = residual_in_fp32
 
-        if input_layer == "linear":
+        if input_layer == "causal_conv1d":
+            self.embed = CausalConv1dSubsampling(input_size, output_size, 3, bias=True)
+        elif input_layer == "causal_conv2d":
+            self.embed = CausalConv2dSubsampling(input_size, output_size, (3, 3), bias=True)
+        elif input_layer == "linear":
             self.embed = torch.nn.Sequential(
                 torch.nn.Linear(input_size, output_size),
                 torch.nn.LayerNorm(output_size),
@@ -154,14 +233,6 @@ class MambaEncoder(torch.nn.Module):
             )
         elif input_layer == "conv2d":
             self.embed = Conv2dSubsampling(input_size, output_size, dropout_rate)
-        elif input_layer == "conv2d1":
-            self.embed = Conv2dSubsampling1(input_size, output_size, dropout_rate)
-        elif input_layer == "conv2d2":
-            self.embed = Conv2dSubsampling2(input_size, output_size, dropout_rate)
-        elif input_layer == "conv2d6":
-            self.embed = Conv2dSubsampling6(input_size, output_size, dropout_rate)
-        elif input_layer == "conv2d8":
-            self.embed = Conv2dSubsampling8(input_size, output_size, dropout_rate)
         elif input_layer == "embed":
             self.embed = torch.nn.Sequential(
                 torch.nn.Embedding(input_size, output_size, padding_idx=padding_idx),
@@ -174,12 +245,11 @@ class MambaEncoder(torch.nn.Module):
                 self.embed = torch.nn.Linear(input_size, output_size)
         else:
             raise ValueError("unknown input_layer: " + input_layer)
-        self.normalize_before = normalize_before
         
-        if self.normalize_before:
-            self.after_norm = LayerNorm(output_size)
 
-        factory_kwargs = {"device": device, "dtype": dtype}
+        self.normalize_before = normalize_before
+        d_model = output_size
+        n_layer = num_blocks
         # We change the order of residual and layer norm:
         # Instead of LN -> Attn / MLP -> Add, we do:
         # Add -> LN -> Attn / MLP / Mixer, returning both the residual branch (output of Add) and
@@ -190,10 +260,10 @@ class MambaEncoder(torch.nn.Module):
             if layer_norm_fn is None or rms_norm_fn is None:
                 raise ImportError("Failed to import Triton LayerNorm / RMSNorm kernels")
 
-        self.layers = torch.nn.ModuleList(
+        self.layers = nn.ModuleList(
             [
                 create_block(
-                    d_model=output_size,
+                    d_model,
                     ssm_cfg=ssm_cfg,
                     norm_epsilon=norm_epsilon,
                     rms_norm=rms_norm,
@@ -202,22 +272,26 @@ class MambaEncoder(torch.nn.Module):
                     layer_idx=i,
                     **factory_kwargs,
                 )
-                for i in range(num_blocks)
+                for i in range(n_layer)
             ]
         )
 
-        self.norm_f = (torch.nn.LayerNorm if not rms_norm else RMSNorm)(
-            output_size, eps=norm_epsilon, **factory_kwargs
+        self.norm_f = (nn.LayerNorm if not rms_norm else RMSNorm)(
+            d_model, eps=norm_epsilon, **factory_kwargs
         )
+
+        if self.normalize_before:
+            self.after_norm = LayerNorm(output_size)
 
         self.apply(
             partial(
                 _init_weights,
-                n_layer=num_blocks,
+                n_layer=n_layer,
                 **(initializer_cfg if initializer_cfg is not None else {}),
             )
         )
-    
+
+
     def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None, **kwargs):
         return {
             i: layer.allocate_inference_cache(batch_size, max_seqlen, dtype=dtype, **kwargs)
@@ -244,16 +318,16 @@ class MambaEncoder(torch.nn.Module):
         Returns:
             position embedded tensor and mask
         """
+        # initdtype = xs_pad.dtype
+        # logging.info(f'xs_pad: {xs_pad.device}, {xs_pad.dtype}')
         masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
 
         if self.embed is None:
             xs_pad = xs_pad
         elif (
             isinstance(self.embed, Conv2dSubsampling)
-            or isinstance(self.embed, Conv2dSubsampling1)
-            or isinstance(self.embed, Conv2dSubsampling2)
-            or isinstance(self.embed, Conv2dSubsampling6)
-            or isinstance(self.embed, Conv2dSubsampling8)
+            or isinstance(self.embed, CausalConv1dSubsampling)
+            or isinstance(self.embed, CausalConv2dSubsampling)
         ):
             short_status, limit_size = check_short_utt(self.embed, xs_pad.size(1))
             if short_status:
@@ -267,18 +341,19 @@ class MambaEncoder(torch.nn.Module):
         else:
             xs_pad = self.embed(xs_pad)
 
+        residual = None
         for layer in self.layers:
-            hidden_states, residual = layer(
-                hidden_states, residual, inference_params=inference_params
+            xs_pad, residual = layer(
+                xs_pad, residual, inference_params=inference_params
             )
         if not self.fused_add_norm:
-            residual = (hidden_states + residual) if residual is not None else hidden_states
-            hidden_states = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+            residual = (xs_pad + residual) if residual is not None else xs_pad
+            xs_pad = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
         else:
             # Set prenorm=False here since we don't need the residual
             fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
-            hidden_states = fused_add_norm_fn(
-                hidden_states,
+            xs_pad = fused_add_norm_fn(
+                xs_pad,
                 self.norm_f.weight,
                 self.norm_f.bias,
                 eps=self.norm_f.eps,
@@ -286,10 +361,13 @@ class MambaEncoder(torch.nn.Module):
                 prenorm=False,
                 residual_in_fp32=self.residual_in_fp32,
             )
-        
+        if isinstance(xs_pad, tuple):
+            xs_pad = xs_pad[0]
         if self.normalize_before:
             xs_pad = self.after_norm(xs_pad)
-
+        # logging.info(f'xs_pad: {xs_pad.device}, {xs_pad.dtype}')
         olens = masks.squeeze(1).sum(1)
 
         return xs_pad, olens, None
+
+

@@ -1,7 +1,7 @@
 
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-03-08 14:35:19
+LastEditTime: 2024-03-24 21:41:37
 FilePath: /espnet/espnet2/asr/uma.py
 Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
 '''
@@ -268,6 +268,6 @@ class UMA(torch.nn.Module):
         if chunk_counts is None:
             logging.info(f'chunk_counts is None!')
         
-        return xs_pad, olens, chunk_counts
-        # return xs_pad, olens, (chunk_counts, (uma_weights, valley_index_start))
+        # return xs_pad, olens, chunk_counts
+        return xs_pad, olens, (chunk_counts, (uma_weights, valley_index_start))
 

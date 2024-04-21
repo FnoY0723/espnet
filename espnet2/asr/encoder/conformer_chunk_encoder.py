@@ -43,9 +43,139 @@ from espnet.nets.pytorch_backend.transformer.subsampling import (
     TooShortUttError,
     check_short_utt,
 )
+import torch.nn as nn
+
+class CausalConv1dSubsampling(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, bias=True):
+        super(CausalConv1dSubsampling, self).__init__()
+        self.padding = (kernel_size - 1)
+
+        self.subsample1 = nn.Sequential(
+            nn.Conv1d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+                bias=bias,
+            ),
+            nn.ReLU(),
+        )
+
+        self.subsample2 = nn.Sequential(
+            nn.Conv1d(
+                out_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+                # groups=out_channels,
+                bias=bias,
+            ),
+            nn.ReLU(),
+        )
+
+    def forward(self, x, x_mask):
+        x = x.transpose(1, 2)
+        x = self.subsample1(x)
+        if self.padding != 0:
+            x = x[:, :, :-self.padding]
+        x = self.subsample2(x)
+        if self.padding != 0:
+            x = x[:, :, :-self.padding]
+        x = x.transpose(1, 2)
+        if x_mask is None:
+            return x, None
+        return x, x_mask[:, :, :-2:2][:, :, :-2:2]
 
 
-class ConformerEncoder(AbsEncoder):
+class CausalConv2dSubsampling(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, dropout_rate, pos_enc=None):
+        super(CausalConv2dSubsampling, self).__init__()
+        self.padding = (kernel_size[0] - 1, 0) 
+
+        self.subsample1 = nn.Sequential(
+            nn.Conv2d(
+                1, 
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+            ),
+            nn.ReLU(),
+        )
+
+        self.subsample2 = nn.Sequential(
+            nn.Conv2d(
+                out_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+            ),
+            nn.ReLU(),
+        )
+
+        # self.out = torch.nn.Linear(out_channels * (((in_channels - 1) // 2 - 1) // 2), out_channels)
+        self.out = torch.nn.Sequential(
+            torch.nn.Linear(out_channels * (((in_channels - 1) // 2 - 1) // 2), out_channels),
+            pos_enc if pos_enc is not None else PositionalEncoding(out_channels, dropout_rate),
+        )
+
+    def forward(self, x, x_mask):
+        x = x.unsqueeze(1)  # (b, c, t, f)
+        x = self.subsample1(x)
+        if self.padding[0] != 0:
+            x = x[:, :, :-self.padding[0], :]
+        x = self.subsample2(x)
+        if self.padding[0] != 0:
+            x = x[:, :, :-self.padding[0], :]
+        b, c, t, f = x.size()
+        x = self.out(x.transpose(1, 2).contiguous().view(b, t, c * f))
+        if x_mask is None:
+            return x, None
+        return x, x_mask[:, :, :-2:2][:, :, :-2:2]
+
+
+def make_chunk_mask(
+        size: int,
+        chunk_size: int,
+        device: torch.device = torch.device("cpu"),
+) -> torch.Tensor:
+    """Create mask for subsequent steps (size, size) with chunk size,
+       this is for streaming encoder
+
+    Args:
+        size (int): size of mask
+        chunk_size (int): size of chunk
+        num_left_chunks (int): number of left chunks
+            <0: use full chunk
+            >=0: use num_left_chunks
+        device (torch.device): "cpu" or "cuda" or torch.Tensor.device
+
+    Returns:
+        torch.Tensor: mask
+
+    Examples:
+        >>> subsequent_chunk_mask(4, 2)
+        [[1, 1, 0, 0],
+         [1, 1, 0, 0],
+         [1, 1, 1, 1],
+         [1, 1, 1, 1]]
+    """
+    org = torch.arange(size).repeat(size, 1).to(device)
+    # ret = torch.zeros(size, size, device=device, dtype=torch.bool)
+    chunk_idx = torch.arange(0, size, chunk_size, device=device)
+    chunk_idx = torch.cat((chunk_idx, torch.tensor([size], device=device)), dim=0)
+    chunk_length = chunk_idx[1:] - chunk_idx[:-1]
+    repeats = torch.repeat_interleave(chunk_idx[1:], chunk_length)
+    ret = org < repeats.reshape(-1, 1)
+    # ret = torch.tril(torch.ones(size, size), diagonal=0).bool().to(device)
+
+    return ret
+
+
+class ConformerChunkEncoder(AbsEncoder):
     """Conformer encoder module.
 
     Args:
@@ -101,7 +231,6 @@ class ConformerEncoder(AbsEncoder):
         selfattention_layer_type: str = "rel_selfattn",
         activation_type: str = "swish",
         use_cnn_module: bool = True,
-        zero_triu: bool = False,
         cnn_module_kernel: int = 31,
         padding_idx: int = -1,
         interctc_layer_idx: List[int] = [],
@@ -109,6 +238,9 @@ class ConformerEncoder(AbsEncoder):
         stochastic_depth_rate: Union[float, List[float]] = 0.0,
         layer_drop_rate: float = 0.0,
         max_pos_emb_len: int = 5000,
+        chunk_size: int = 16,
+        cnn_module_norm: str = "batch_norm",
+        causal: bool = True,
     ):
         assert check_argument_types()
         super().__init__()
@@ -142,56 +274,22 @@ class ConformerEncoder(AbsEncoder):
         else:
             raise ValueError("unknown pos_enc_layer: " + pos_enc_layer_type)
 
-        if input_layer == "linear":
-            self.embed = torch.nn.Sequential(
-                torch.nn.Linear(input_size, output_size),
-                torch.nn.LayerNorm(output_size),
-                torch.nn.Dropout(dropout_rate),
+
+        if input_layer == "causal_conv1d":
+            self.embed = CausalConv1dSubsampling(input_size, output_size, 3, bias=True)
+        elif input_layer == "causal_conv2d":
+            self.embed = CausalConv2dSubsampling(
+                input_size, 
+                output_size, 
+                (3, 3), 
+                dropout_rate,
                 pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len),
-            )
+                )
         elif input_layer == "conv2d":
             self.embed = Conv2dSubsampling(
                 input_size,
                 output_size,
                 dropout_rate,
-                pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len),
-            )
-        elif input_layer == "conv2d1":
-            self.embed = Conv2dSubsampling1(
-                input_size,
-                output_size,
-                dropout_rate,
-                pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len),
-            )
-        elif input_layer == "conv2d2":
-            self.embed = Conv2dSubsampling2(
-                input_size,
-                output_size,
-                dropout_rate,
-                pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len),
-            )
-        elif input_layer == "conv2d6":
-            self.embed = Conv2dSubsampling6(
-                input_size,
-                output_size,
-                dropout_rate,
-                pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len),
-            )
-        elif input_layer == "conv2d8":
-            self.embed = Conv2dSubsampling8(
-                input_size,
-                output_size,
-                dropout_rate,
-                pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len),
-            )
-        elif input_layer == "embed":
-            self.embed = torch.nn.Sequential(
-                torch.nn.Embedding(input_size, output_size, padding_idx=padding_idx),
-                pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len),
-            )
-        elif isinstance(input_layer, torch.nn.Module):
-            self.embed = torch.nn.Sequential(
-                input_layer,
                 pos_enc_class(output_size, positional_dropout_rate, max_pos_emb_len),
             )
         elif input_layer is None:
@@ -253,13 +351,12 @@ class ConformerEncoder(AbsEncoder):
                 attention_heads,
                 output_size,
                 attention_dropout_rate,
-                zero_triu,
             )
         else:
             raise ValueError("unknown encoder_attn_layer: " + selfattention_layer_type)
 
         convolution_layer = ConvolutionModule
-        convolution_layer_args = (output_size, cnn_module_kernel, activation)
+        convolution_layer_args = (output_size, cnn_module_kernel, activation, cnn_module_norm, causal)
 
         if isinstance(stochastic_depth_rate, float):
             stochastic_depth_rate = [stochastic_depth_rate] * num_blocks
@@ -293,6 +390,7 @@ class ConformerEncoder(AbsEncoder):
             assert 0 < min(interctc_layer_idx) and max(interctc_layer_idx) < num_blocks
         self.interctc_use_conditioning = interctc_use_conditioning
         self.conditioning_layer = None
+        self.chunk_size = chunk_size
 
     def output_size(self) -> int:
         return self._output_size
@@ -320,11 +418,9 @@ class ConformerEncoder(AbsEncoder):
         masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
 
         if (
-            isinstance(self.embed, Conv2dSubsampling)
-            or isinstance(self.embed, Conv2dSubsampling1)
-            or isinstance(self.embed, Conv2dSubsampling2)
-            or isinstance(self.embed, Conv2dSubsampling6)
-            or isinstance(self.embed, Conv2dSubsampling8)
+            isinstance(self.embed, CausalConv1dSubsampling)
+            or isinstance(self.embed, CausalConv2dSubsampling)
+            or isinstance(self.embed, Conv2dSubsampling)
         ):
             short_status, limit_size = check_short_utt(self.embed, xs_pad.size(1))
             if short_status:
@@ -338,13 +434,20 @@ class ConformerEncoder(AbsEncoder):
         else:
             xs_pad = self.embed(xs_pad)
 
-        logging.info(f'xspad: {xs_pad[0].device}, {xs_pad[0].dtype}')
+        chunk_masks = make_chunk_mask(xs_pad[0].size(1), self.chunk_size, device=xs_pad[0].device) # (L, L)
+        chunk_masks = chunk_masks.unsqueeze(0)  # (1, L, L)
+        # logging.info(f'{chunk_masks[0]}')
+        chunk_masks = masks & chunk_masks  # (B, L, L)
+        # logging.info(f'{chunk_masks[0]}')
+        # logging.info(f'chunk_masks: {chunk_masks.shape} {chunk_masks.dtype} {chunk_masks.device}')
+        # logging.info(f'masks: {masks.shape} {masks.dtype} {masks.device}')
+
         intermediate_outs = []
         if len(self.interctc_layer_idx) == 0:
-            xs_pad, masks = self.encoders(xs_pad, masks)
+            xs_pad, chunk_masks = self.encoders(xs_pad, chunk_masks)
         else:
             for layer_idx, encoder_layer in enumerate(self.encoders):
-                xs_pad, masks = encoder_layer(xs_pad, masks)
+                xs_pad, chunk_masks = encoder_layer(xs_pad, chunk_masks)
 
                 if layer_idx + 1 in self.interctc_layer_idx:
                     encoder_out = xs_pad
@@ -375,6 +478,5 @@ class ConformerEncoder(AbsEncoder):
         olens = masks.squeeze(1).sum(1)
         if len(intermediate_outs) > 0:
             return (xs_pad, intermediate_outs), olens, None
-        
-        logging.info(f'xspad: {xs_pad.device} {xs_pad.dtype}')
+    
         return xs_pad, olens, None

@@ -2,14 +2,13 @@
 ###
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 11:50:24
- # @LastEditors: FnoY 1084585914@qq.com
- # @LastEditTime: 2023-11-07 10:50:13
+ # @LastEditors: FnoY0723 fangying@westlake.edu.cn
+ # @LastEditTime: 2024-03-14 19:43:14
  # @FilePath: /espnet/egs2/aishell/asr1/run.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
-CUDA_VISIBLE_DEVICES=6
 set -e
 set -u
 set -o pipefail
@@ -18,15 +17,15 @@ train_set=train
 valid_set=dev   
 test_sets="dev test"
 
-# asr_config=conf/train_asr_conformer.yaml
+asr_config=conf/train_asr_conformer.yaml
 # inference_config=conf/decode_asr_transformer.yaml
-asr_config=conf_transducer/train_conformer-rnn_transducer.yaml
+# asr_config=conf_transducer/train_conformer-rnn_transducer.yaml
 inference_config=conf_transducer/decode.yaml
 
 lm_config=conf/train_lm_transformer.yaml
 use_lm=false
 use_wordlm=false
-expdir=exp_conformer_rnn_transducer_231102
+expdir=exp_conformer_0314test
 inference_asr_model=valid.acc.ave_10best.pth
 
 # speed perturbation related
@@ -36,7 +35,7 @@ speed_perturb_factors="0.9 1.0 1.1"
 ./asr.sh \
     --nj 64 \
     --inference_nj 64 \
-    --ngpu 2 \
+    --ngpu 1 \
     --lang zh \
     --audio_format "flac.ark" \
     --feats_type raw \

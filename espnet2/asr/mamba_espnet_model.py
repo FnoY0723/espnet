@@ -6,7 +6,6 @@ import torch
 from packaging.version import parse as V
 from typeguard import check_argument_types
 
-from espnet2.asr.uma import UMA
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
@@ -35,7 +34,7 @@ else:
         yield
 
 
-class ESPnetASRModel(AbsESPnetModel):
+class MambaESPnetASRModel(AbsESPnetModel):
     """CTC-attention hybrid Encoder-Decoder model"""
 
     def __init__(
@@ -46,7 +45,7 @@ class ESPnetASRModel(AbsESPnetModel):
         specaug: Optional[AbsSpecAug],
         normalize: Optional[AbsNormalize],
         preencoder: Optional[AbsPreEncoder],
-        encoder: AbsEncoder,
+        encoder: torch.nn.Module,
         postencoder: Optional[AbsPostEncoder],
         decoder: Optional[AbsDecoder],
         ctc: CTC,
@@ -187,8 +186,6 @@ class ESPnetASRModel(AbsESPnetModel):
             self.ctc = None
         else:
             self.ctc = ctc
-        
-        # self.uma = UMA(256, 256)
 
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
 
@@ -237,7 +234,6 @@ class ESPnetASRModel(AbsESPnetModel):
 
         # 1. Encoder
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
-        # encoder_out, encoder_out_lens = self.uma(encoder_out, encoder_out_lens)
 
         intermediate_outs = None
         if isinstance(encoder_out, tuple):
@@ -378,8 +374,9 @@ class ESPnetASRModel(AbsESPnetModel):
         """
         with autocast(False):
             # 1. Extract feats
+            # logging.info(f'speech: {speech[0]}')
             feats, feats_lengths = self._extract_feats(speech, speech_lengths)
-
+            # logging.info(f'feats: {feats[0]}')
             # 2. Data augmentation
             if self.specaug is not None and self.training:
                 feats, feats_lengths = self.specaug(feats, feats_lengths)
@@ -387,7 +384,7 @@ class ESPnetASRModel(AbsESPnetModel):
             # 3. Normalization for feature: e.g. Global-CMVN, Utterance-CMVN
             if self.normalize is not None:
                 feats, feats_lengths = self.normalize(feats, feats_lengths)
-
+            # logging.info(f'feats after normalization: {feats[0]}')
         # Pre-encoder, e.g. used for raw input data
         if self.preencoder is not None:
             feats, feats_lengths = self.preencoder(feats, feats_lengths)
@@ -395,6 +392,7 @@ class ESPnetASRModel(AbsESPnetModel):
         # 4. Forward encoder
         # feats: (Batch, Length, Dim)
         # -> encoder_out: (Batch, Length2, Dim2)
+        # logging.info(f'feats before encoder: {feats[0]}')
         if self.encoder.interctc_use_conditioning:
             encoder_out, encoder_out_lens, _ = self.encoder(
                 feats, feats_lengths, ctc=self.ctc
@@ -405,6 +403,7 @@ class ESPnetASRModel(AbsESPnetModel):
         if isinstance(encoder_out, tuple):
             intermediate_outs = encoder_out[1]
             encoder_out = encoder_out[0]
+        # logging.info(f'encoder_out: {encoder_out[0]}')
 
         # Post-encoder, e.g. NLU
         if self.postencoder is not None:

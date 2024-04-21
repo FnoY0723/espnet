@@ -11,7 +11,7 @@ from typeguard import check_argument_types
 from espnet2.asr.ctc import CTC
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
-from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
+from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention, StreamingMultiHeadedAttention
 from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
 from espnet.nets.pytorch_backend.transformer.encoder_layer import EncoderLayer
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
@@ -33,6 +33,53 @@ from espnet.nets.pytorch_backend.transformer.subsampling import (
     check_short_utt,
 )
 
+
+class CausalConv2dSubsampling(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, dropout_rate, pos_enc=None):
+        super(CausalConv2dSubsampling, self).__init__()
+        self.padding = (kernel_size[0] - 1, 0) 
+
+        self.subsample1 = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                1, 
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+            ),
+            torch.nn.ReLU(),
+        )
+
+        self.subsample2 = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                out_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=self.padding,
+                stride=2,
+            ),
+            torch.nn.ReLU(),
+        )
+
+        self.out = torch.nn.Sequential(
+            torch.nn.Linear(out_channels * (((in_channels - 1) // 2 - 1) // 2), out_channels),
+            pos_enc if pos_enc is not None else PositionalEncoding(out_channels, dropout_rate),
+        )
+
+    def forward(self, x, x_mask):
+        x = x.unsqueeze(1)  # (b, c, t, f)
+        x = self.subsample1(x)
+        if self.padding[0] != 0:
+            x = x[:, :, :-self.padding[0], :]
+        x = self.subsample2(x)
+        if self.padding[0] != 0:
+            x = x[:, :, :-self.padding[0], :]
+        b, c, t, f = x.size()
+        x = self.out(x.transpose(1, 2).contiguous().view(b, t, c * f))
+        if x_mask is None:
+            return x, None
+        return x, x_mask[:, :, :-2:2][:, :, :-2:2]
+    
 
 class TransformerEncoder(AbsEncoder):
     """Transformer encoder module.
@@ -91,6 +138,13 @@ class TransformerEncoder(AbsEncoder):
                 torch.nn.ReLU(),
                 pos_enc_class(output_size, positional_dropout_rate),
             )
+        elif input_layer == "causal_conv2d":
+            self.embed = CausalConv2dSubsampling(
+                input_size, 
+                output_size, 
+                (3, 3), 
+                dropout_rate,
+                )
         elif input_layer == "conv2d":
             self.embed = Conv2dSubsampling(input_size, output_size, dropout_rate)
         elif input_layer == "conv2d1":
@@ -143,7 +197,7 @@ class TransformerEncoder(AbsEncoder):
             num_blocks,
             lambda lnum: EncoderLayer(
                 output_size,
-                MultiHeadedAttention(
+                StreamingMultiHeadedAttention(
                     attention_heads, output_size, attention_dropout_rate
                 ),
                 positionwise_layer(*positionwise_layer_args),
@@ -185,7 +239,8 @@ class TransformerEncoder(AbsEncoder):
         if self.embed is None:
             xs_pad = xs_pad
         elif (
-            isinstance(self.embed, Conv2dSubsampling)
+            isinstance(self.embed, CausalConv2dSubsampling)
+            or isinstance(self.embed, Conv2dSubsampling)
             or isinstance(self.embed, Conv2dSubsampling1)
             or isinstance(self.embed, Conv2dSubsampling2)
             or isinstance(self.embed, Conv2dSubsampling6)

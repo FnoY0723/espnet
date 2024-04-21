@@ -32,6 +32,7 @@ from espnet2.asr.encoder.unimodal_attention_encoder import UnimodalAttentionEnco
 from espnet2.asr.encoder.unimodal_conformer_encoder import UnimodalConformerEncoder
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
+from espnet2.asr.encoder.conformer_chunk_encoder import ConformerChunkEncoder
 from espnet2.asr.encoder.contextual_block_conformer_encoder import (
     ContextualBlockConformerEncoder,
 )
@@ -151,6 +152,7 @@ encoder_choices = ClassChoices(
         unimodal_attention = UnimodalAttentionEncoder,
         unimodal_conformer = UnimodalConformerEncoder,
         conformer=ConformerEncoder,
+        conformer_chunk=ConformerChunkEncoder,
         transformer=TransformerEncoder,
         transformer_multispkr=TransformerEncoderMultiSpkr,
         contextual_block_transformer=ContextualBlockTransformerEncoder,

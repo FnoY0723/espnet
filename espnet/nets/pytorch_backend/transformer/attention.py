@@ -436,7 +436,7 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
                 (#batch, time1, time2).
 
         Returns:
-            torch.Tensor: Output tensor (#batch, time1, d_model).
+            torch.Tensor: Output tensor (#batch, time1, d_model). 
 
         """
         q, k, v = self.forward_qkv(query, key, value)

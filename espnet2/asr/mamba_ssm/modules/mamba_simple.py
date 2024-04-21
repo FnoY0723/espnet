@@ -10,20 +10,21 @@ from torch import Tensor
 
 from einops import rearrange, repeat
 
-from mamba_ssm.ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn
+from espnet2.asr.mamba_ssm.ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn
+
+# try:
+#     from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
+# except ImportError:
+#     causal_conv1d_fn, causal_conv1d_update = None, None
+causal_conv1d_fn, causal_conv1d_update = None, None
 
 try:
-    from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
-except ImportError:
-    causal_conv1d_fn, causal_conv1d_update = None, None
-
-try:
-    from mamba_ssm.ops.triton.selective_state_update import selective_state_update
+    from espnet2.asr.mamba_ssm.ops.triton.selective_state_update import selective_state_update
 except ImportError:
     selective_state_update = None
 
 try:
-    from mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
+    from espnet2.asr.mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
 except ImportError:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
@@ -33,7 +34,7 @@ class Mamba(nn.Module):
         self,
         d_model,
         d_state=16,
-        d_conv=4,
+        d_conv=8,
         expand=2,
         dt_rank="auto",
         dt_min=0.001,
@@ -43,7 +44,7 @@ class Mamba(nn.Module):
         dt_init_floor=1e-4,
         conv_bias=True,
         bias=False,
-        use_fast_path=True,  # Fused kernel options
+        use_fast_path=False,  # Fused kernel options
         layer_idx=None,
         device=None,
         dtype=None,

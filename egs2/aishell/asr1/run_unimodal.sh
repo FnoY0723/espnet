@@ -3,7 +3,7 @@
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 17:30:10
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-03-07 20:02:02
+ # @LastEditTime: 2024-04-04 23:13:59
  # @FilePath: /espnet/egs2/aishell/asr1/run_unimodal.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
@@ -19,14 +19,14 @@ valid_set=dev
 test_sets="test"
 
 asr_config=conf/train_asr_streaming_uma_conformer.yaml
-inference_config=conf/decode_asr_streaming_uma.yaml
+inference_config=conf/decode_asr_unimodal_attention.yaml
 
 lm_config=conf/train_lm_transformer.yaml
 use_lm=false
 use_wordlm=false
 expdir=exp_streaminguma_conformer_ctc_0129
 inference_asr_model=valid.cer.ave_10best.pth
-use_streaming=true
+use_streaming=false
 
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
@@ -38,7 +38,7 @@ speed_perturb_factors="0.9 1.0 1.1"
     --inference_nj 64 \
     --ngpu 1 \
     --lang zh \
-    --audio_format wav \
+    --audio_format "flac.ark" \
     --feats_type raw \
     --token_type char \
     --use_lm ${use_lm}                                 \
