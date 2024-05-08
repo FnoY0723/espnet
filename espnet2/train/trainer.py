@@ -372,7 +372,7 @@ class Trainer:
                 for _phase, k, _mode in trainer_options.best_model_criterion:
                     # e.g. _phase, k, _mode = "train", "loss", "min"
                     if reporter.has(_phase, k):
-                        best_epoch = reporter.get_best_epoch(_phase, k, _mode)
+                        best_epoch = reporter.get_best_epoch(_phase,  k, _mode)
                         # Creates sym links if it's the best result
                         if best_epoch == iepoch:
                             p = output_dir / f"{_phase}.{k}.best.pth"

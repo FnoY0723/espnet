@@ -261,6 +261,8 @@ class TransformerDecoder(BaseTransformerDecoder):
         )
 
         attention_dim = encoder_output_size
+        if encoder_output_size != 256:
+            attention_dim = 256
         self.decoders = repeat(
             num_blocks,
             lambda lnum: DecoderLayer(

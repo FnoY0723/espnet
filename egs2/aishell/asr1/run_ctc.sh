@@ -2,7 +2,7 @@
 ###
  # @Author: FnoY fangying@westlake.edu.cn
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-04-13 00:08:21
+ # @LastEditTime: 2024-04-29 11:14:45
  # @FilePath: /espnet/egs2/aishell/asr1/run_ctc.sh
 ### 
 # Set bash to 'debug' mode, it will exit on :
@@ -30,8 +30,8 @@ inference_asr_model=valid.cer_ctc.ave_10best.pth
 speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr.sh \
-    --nj 64 \
-    --inference_nj 64 \
+    --nj 32 \
+    --inference_nj 32 \
     --ngpu 1 \
     --lang zh \
     --audio_format "flac.ark" \

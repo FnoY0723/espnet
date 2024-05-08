@@ -46,6 +46,7 @@ try:
 except ImportError:
     is_transformers_available = False
 
+from espnet2.torch_utils.model_summary import model_summary
 
 class Speech2Text:
     """Speech2Text class
@@ -136,6 +137,9 @@ class Speech2Text:
             )
 
         decoder = asr_model.decoder
+
+        logging.info(model_summary(asr_model.encoder))
+        logging.info(model_summary(asr_model.decoder))
 
         ctc = CTCPrefixScorer(ctc=asr_model.ctc, eos=asr_model.eos)
         token_list = asr_model.token_list

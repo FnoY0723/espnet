@@ -280,8 +280,15 @@ class MambaEncoder(nn.Module):
             d_model, eps=norm_epsilon, **factory_kwargs
         )
 
+        output_size_embed = 256
+        self._output_size = output_size_embed
+        self.encoder_out_embed = torch.nn.Sequential(
+                torch.nn.Linear(output_size, output_size_embed),
+                torch.nn.LayerNorm(output_size_embed),
+            )
+        
         if self.normalize_before:
-            self.after_norm = LayerNorm(output_size)
+            self.after_norm = LayerNorm(output_size_embed)
 
         self.apply(
             partial(
@@ -363,10 +370,15 @@ class MambaEncoder(nn.Module):
             )
         if isinstance(xs_pad, tuple):
             xs_pad = xs_pad[0]
+        
+        xs_pad = self.encoder_out_embed(xs_pad)
         if self.normalize_before:
             xs_pad = self.after_norm(xs_pad)
         # logging.info(f'xs_pad: {xs_pad.device}, {xs_pad.dtype}')
-        olens = masks.squeeze(1).sum(1)
+        # logging.info(f'xs_pad: {xs_pad.shape}')
+        xs_pad = xs_pad[:, 5:, :]
+        # logging.info(f'xs_pad: {xs_pad.shape}')
+        olens = masks.squeeze(1).sum(1)-5
 
         return xs_pad, olens, None
 

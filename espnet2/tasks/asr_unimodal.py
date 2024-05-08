@@ -28,6 +28,7 @@ from espnet2.asr.decoder.transformer_decoder import (
 )
 from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
+from espnet2.asr.encoder.mamba_encoder import MambaEncoder
 from espnet2.asr.encoder.unimodal_attention_encoder import UnimodalAttentionEncoder
 from espnet2.asr.encoder.unimodal_conformer_encoder import UnimodalConformerEncoder
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
@@ -149,6 +150,7 @@ preencoder_choices = ClassChoices(
 encoder_choices = ClassChoices(
     "encoder",
     classes=dict(
+        mamba=MambaEncoder,
         unimodal_attention = UnimodalAttentionEncoder,
         unimodal_conformer = UnimodalConformerEncoder,
         conformer=ConformerEncoder,
@@ -168,7 +170,7 @@ encoder_choices = ClassChoices(
         whisper=OpenAIWhisperEncoder,
         e_branchformer=EBranchformerEncoder,
     ),
-    type_check=AbsEncoder,
+    # type_check=AbsEncoder,
     default="rnn",
 )
 postencoder_choices = ClassChoices(
@@ -567,7 +569,7 @@ class ASRTask(AbsTask):
             postencoder = None
 
         # UMA
-        uma = UMA(256, 256)
+        uma = UMA(encoder_output_size, encoder_output_size)
 
         # 5. Decoder
         if getattr(args, "decoder", None) is not None:
@@ -599,7 +601,7 @@ class ASRTask(AbsTask):
 
         # 6. CTC
         ctc = CTC(
-            odim=vocab_size, encoder_output_size=encoder_output_size, **args.ctc_conf
+            odim=vocab_size, encoder_output_size=decoder.output_size(), **args.ctc_conf
         )
 
         # 7. Build model

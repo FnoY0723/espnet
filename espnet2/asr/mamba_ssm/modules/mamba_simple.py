@@ -34,7 +34,7 @@ class Mamba(nn.Module):
         self,
         d_model,
         d_state=16,
-        d_conv=8,
+        d_conv=4,
         expand=2,
         dt_rank="auto",
         dt_min=0.001,

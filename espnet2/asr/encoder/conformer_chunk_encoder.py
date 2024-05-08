@@ -140,6 +140,7 @@ class CausalConv2dSubsampling(nn.Module):
 def make_chunk_mask(
         size: int,
         chunk_size: int,
+        use_dynamic_chunk: bool,
         device: torch.device = torch.device("cpu"),
 ) -> torch.Tensor:
     """Create mask for subsequent steps (size, size) with chunk size,
@@ -148,9 +149,7 @@ def make_chunk_mask(
     Args:
         size (int): size of mask
         chunk_size (int): size of chunk
-        num_left_chunks (int): number of left chunks
-            <0: use full chunk
-            >=0: use num_left_chunks
+        use_dynamic_chunk (bool): whether to use dynamic chunk or not
         device (torch.device): "cpu" or "cuda" or torch.Tensor.device
 
     Returns:
@@ -163,6 +162,17 @@ def make_chunk_mask(
          [1, 1, 1, 1],
          [1, 1, 1, 1]]
     """
+    # use_dynamic_chunk = False
+    # chunk_size = 20
+    if use_dynamic_chunk:
+        max_len = size
+        chunk_size = torch.randint(1, max_len, (1, )).item()
+        if chunk_size > max_len // 2:
+                chunk_size = max_len
+        else:
+            chunk_size = chunk_size % 32 + 1
+
+    # logging.info(f'use_dynamic_chunk: {use_dynamic_chunk}, chunk_size: {chunk_size}')
     org = torch.arange(size).repeat(size, 1).to(device)
     # ret = torch.zeros(size, size, device=device, dtype=torch.bool)
     chunk_idx = torch.arange(0, size, chunk_size, device=device)
@@ -231,14 +241,15 @@ class ConformerChunkEncoder(AbsEncoder):
         selfattention_layer_type: str = "rel_selfattn",
         activation_type: str = "swish",
         use_cnn_module: bool = True,
-        cnn_module_kernel: int = 31,
+        cnn_module_kernel: int = 15,
         padding_idx: int = -1,
         interctc_layer_idx: List[int] = [],
         interctc_use_conditioning: bool = False,
         stochastic_depth_rate: Union[float, List[float]] = 0.0,
         layer_drop_rate: float = 0.0,
         max_pos_emb_len: int = 5000,
-        chunk_size: int = 16,
+        chunk_size: int = 0,
+        use_dynamic_chunk: bool = False,
         cnn_module_norm: str = "batch_norm",
         causal: bool = True,
     ):
@@ -391,6 +402,7 @@ class ConformerChunkEncoder(AbsEncoder):
         self.interctc_use_conditioning = interctc_use_conditioning
         self.conditioning_layer = None
         self.chunk_size = chunk_size
+        self.use_dynamic_chunk = use_dynamic_chunk
 
     def output_size(self) -> int:
         return self._output_size
@@ -434,7 +446,7 @@ class ConformerChunkEncoder(AbsEncoder):
         else:
             xs_pad = self.embed(xs_pad)
 
-        chunk_masks = make_chunk_mask(xs_pad[0].size(1), self.chunk_size, device=xs_pad[0].device) # (L, L)
+        chunk_masks = make_chunk_mask(xs_pad[0].size(1), self.chunk_size, self.use_dynamic_chunk,device=xs_pad[0].device) # (L, L)
         chunk_masks = chunk_masks.unsqueeze(0)  # (1, L, L)
         # logging.info(f'{chunk_masks[0]}')
         chunk_masks = masks & chunk_masks  # (B, L, L)

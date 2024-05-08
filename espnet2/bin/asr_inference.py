@@ -37,6 +37,7 @@ from espnet.nets.scorer_interface import BatchScorerInterface
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.nets.scorers.length_bonus import LengthBonus
 from espnet.utils.cli_utils import get_commandline_args
+from espnet2.torch_utils.model_summary import model_summary
 
 try:
     from transformers import AutoModelForSeq2SeqLM
@@ -137,6 +138,9 @@ class Speech2Text:
 
         decoder = asr_model.decoder
 
+        logging.info(model_summary(asr_model.encoder))
+        logging.info(model_summary(asr_model.decoder))
+        
         ctc = CTCPrefixScorer(ctc=asr_model.ctc, eos=asr_model.eos)
         token_list = asr_model.token_list
         scorers.update(

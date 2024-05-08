@@ -3,7 +3,7 @@
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 17:30:10
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-04-04 23:13:59
+ # @LastEditTime: 2024-04-30 22:49:55
  # @FilePath: /espnet/egs2/aishell/asr1/run_unimodal.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
@@ -34,8 +34,8 @@ speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr_unimodal.sh \
     --use_streaming ${use_streaming}  \
-    --nj 64 \
-    --inference_nj 64 \
+    --nj 32 \
+    --inference_nj 1 \
     --ngpu 1 \
     --lang zh \
     --audio_format "flac.ark" \

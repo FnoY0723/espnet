@@ -1,6 +1,6 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-03-21 18:35:17
+LastEditTime: 2024-04-30 20:09:13
 FilePath: /espnet/espnet2/asr/unimodal_attention_model.py
 '''
 import logging
@@ -51,7 +51,7 @@ class UAMASRModel(AbsESPnetModel):
         specaug: Optional[AbsSpecAug],
         normalize: Optional[AbsNormalize],
         preencoder: Optional[AbsPreEncoder],
-        encoder: AbsEncoder,
+        encoder: torch.nn.Module,
         postencoder: Optional[AbsPostEncoder],
         decoder: Optional[AbsDecoder],
         ctc: CTC,

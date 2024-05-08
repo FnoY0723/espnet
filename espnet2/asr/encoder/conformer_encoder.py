@@ -338,7 +338,7 @@ class ConformerEncoder(AbsEncoder):
         else:
             xs_pad = self.embed(xs_pad)
 
-        logging.info(f'xspad: {xs_pad[0].device}, {xs_pad[0].dtype}')
+        # logging.info(f'xspad: {xs_pad[0].device}, {xs_pad[0].dtype}')
         intermediate_outs = []
         if len(self.interctc_layer_idx) == 0:
             xs_pad, masks = self.encoders(xs_pad, masks)
@@ -376,5 +376,5 @@ class ConformerEncoder(AbsEncoder):
         if len(intermediate_outs) > 0:
             return (xs_pad, intermediate_outs), olens, None
         
-        logging.info(f'xspad: {xs_pad.device} {xs_pad.dtype}')
+        # logging.info(f'xspad: {xs_pad.device} {xs_pad.dtype}')
         return xs_pad, olens, None
