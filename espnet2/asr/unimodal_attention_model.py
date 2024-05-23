@@ -1,6 +1,6 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-04-30 20:09:13
+LastEditTime: 2024-05-22 11:46:30
 FilePath: /espnet/espnet2/asr/unimodal_attention_model.py
 '''
 import logging
@@ -119,7 +119,7 @@ class UAMASRModel(AbsESPnetModel):
                 self.encoder.interctc_use_conditioning = False
         if self.encoder.interctc_use_conditioning:
             self.encoder.conditioning_layer = torch.nn.Linear(
-                vocab_size, self.encoder.output_size()
+                vocab_size, 512
             )
 
         self.uma = uma

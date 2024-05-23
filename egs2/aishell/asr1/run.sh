@@ -3,7 +3,7 @@
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 11:50:24
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-03-14 19:43:14
+ # @LastEditTime: 2024-05-09 13:34:53
  # @FilePath: /espnet/egs2/aishell/asr1/run.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
@@ -15,7 +15,7 @@ set -o pipefail
 
 train_set=train
 valid_set=dev   
-test_sets="dev test"
+test_sets="test"
 
 asr_config=conf/train_asr_conformer.yaml
 # inference_config=conf/decode_asr_transformer.yaml
@@ -26,15 +26,15 @@ lm_config=conf/train_lm_transformer.yaml
 use_lm=false
 use_wordlm=false
 expdir=exp_conformer_0314test
-inference_asr_model=valid.acc.ave_10best.pth
-
+# inference_asr_model=valid.acc.ave_10best.pth
+inference_asr_model=valid.cer_ctc.ave_10best.pth
 # speed perturbation related
 # (train_set will be "${train_set}_sp" if speed_perturb_factors is specified)
 speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr.sh \
     --nj 64 \
-    --inference_nj 64 \
+    --inference_nj 1 \
     --ngpu 1 \
     --lang zh \
     --audio_format "flac.ark" \

@@ -10,7 +10,7 @@ from espnet2.asr.ctc import CTC
 from espnet2.asr.uma import UMA
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.decoder.unimodal_attention_decoder import UnimodalAttentionDecoder
-from espnet2.asr.decoder.unimodal_conformer_decoder import UnimodalConformerDecoder
+from espnet2.asr.decoder.mamba_decoder import MambaDecoder
 
 from espnet2.asr.decoder.hugging_face_transformers_decoder import (  # noqa: H301
     HuggingFaceTransformersDecoder,
@@ -186,7 +186,7 @@ decoder_choices = ClassChoices(
     "decoder",
     classes=dict(
         unimodal_transformer=UnimodalAttentionDecoder,
-        unimodal_conformer=UnimodalConformerDecoder,
+        mamba=MambaDecoder,
         transformer=TransformerDecoder,
         lightweight_conv=LightweightConvolutionTransformerDecoder,
         lightweight_conv2d=LightweightConvolution2DTransformerDecoder,

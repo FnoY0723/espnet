@@ -10,6 +10,8 @@ from espnet2.asr.ctc import CTC
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
 from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
+from espnet.nets.pytorch_backend.nets_utils import get_activation
+from espnet.nets.pytorch_backend.conformer.convolution import ConvolutionModule
 
 from espnet.nets.pytorch_backend.transformer.repeat import repeat
 from espnet.nets.pytorch_backend.transformer.subsampling import (
@@ -186,6 +188,129 @@ class CausalConv2dSubsampling(nn.Module):
         return x, x_mask[:, :, :-2:2][:, :, :-2:2]
 
 
+
+class Conv2dSubsampling5(torch.nn.Module):
+    """Convolutional 2D subsampling (to 1/4 length).
+
+    Args:
+        idim (int): Input dimension.
+        odim (int): Output dimension.
+        dropout_rate (float): Dropout rate.
+        pos_enc (torch.nn.Module): Custom position encoding layer.
+
+    """
+
+    def __init__(self, idim, odim, dropout_rate, pos_enc=None):
+        """lookahead 12*8=96ms"""
+        super(Conv2dSubsampling5, self).__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(1, odim, (5, 3), 2),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(odim, odim, (5, 3), 2),
+            torch.nn.ReLU(),
+        )
+        self.out = torch.nn.Sequential(
+            torch.nn.Linear(odim * (((idim - 1) // 2 - 1) // 2), odim),
+            pos_enc if pos_enc is not None else PositionalEncoding(odim, dropout_rate),
+        )
+
+    def forward(self, x, x_mask):
+        """Subsample x.
+
+        Args:
+            x (torch.Tensor): Input tensor (#batch, time, idim).
+            x_mask (torch.Tensor): Input mask (#batch, 1, time).
+
+        Returns:
+            torch.Tensor: Subsampled tensor (#batch, time', odim),
+                where time' = time // 4.
+            torch.Tensor: Subsampled mask (#batch, 1, time'),
+                where time' = time // 4.
+
+        """
+        x = x.unsqueeze(1)  # (b, c, t, f)
+        # logging.info(f"Conv2dSubsampling5: input shape: {x.shape}")
+        x = self.conv(x)
+        b, c, t, f = x.size()
+        # logging.info(f"Conv2dSubsampling5: output shape: {x.shape}")
+        x = self.out(x.transpose(1, 2).contiguous().view(b, t, c * f))
+        if x_mask is None:
+            return x, None
+        return x, x_mask[:, :, :-4:2][:, :, :-4:2]
+
+    def __getitem__(self, key):
+        """Get item.
+
+        When reset_parameters() is called, if use_scaled_pos_enc is used,
+            return the positioning encoding.
+
+        """
+        if key != -1:
+            raise NotImplementedError("Support only `-1` (for `reset_parameters`).")
+        return self.out[key]
+
+
+class Conv2dSubsampling7(torch.nn.Module):
+    """Convolutional 2D subsampling (to 1/4 length).
+
+    Args:
+        idim (int): Input dimension.
+        odim (int): Output dimension.
+        dropout_rate (float): Dropout rate.
+        pos_enc (torch.nn.Module): Custom position encoding layer.
+
+    """
+
+    def __init__(self, idim, odim, dropout_rate, pos_enc=None):
+        """lookahead 18*8=144ms"""
+        super(Conv2dSubsampling7, self).__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(1, odim, (7, 3), 2),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(odim, odim, (7, 3), 2),
+            torch.nn.ReLU(),
+        )
+        self.out = torch.nn.Sequential(
+            torch.nn.Linear(odim * (((idim - 1) // 2 - 1) // 2), odim),
+            pos_enc if pos_enc is not None else PositionalEncoding(odim, dropout_rate),
+        )
+
+    def forward(self, x, x_mask):
+        """Subsample x.
+
+        Args:
+            x (torch.Tensor): Input tensor (#batch, time, idim).
+            x_mask (torch.Tensor): Input mask (#batch, 1, time).
+
+        Returns:
+            torch.Tensor: Subsampled tensor (#batch, time', odim),
+                where time' = time // 4.
+            torch.Tensor: Subsampled mask (#batch, 1, time'),
+                where time' = time // 4.
+
+        """
+        x = x.unsqueeze(1)  # (b, c, t, f)
+        # logging.info(f"Conv2dSubsampling7: input shape: {x.shape}")
+        x = self.conv(x)
+        # logging.info(f"Conv2dSubsampling7: output shape: {x.shape}")
+        b, c, t, f = x.size()
+        x = self.out(x.transpose(1, 2).contiguous().view(b, t, c * f))
+        if x_mask is None:
+            return x, None
+        return x, x_mask[:, :, :-6:2][:, :, :-6:2]
+
+    def __getitem__(self, key):
+        """Get item.
+
+        When reset_parameters() is called, if use_scaled_pos_enc is used,
+            return the positioning encoding.
+
+        """
+        if key != -1:
+            raise NotImplementedError("Support only `-1` (for `reset_parameters`).")
+        return self.out[key]
+
+
 class MambaEncoder(nn.Module):
     """Transformer encoder module.
 
@@ -196,7 +321,7 @@ class MambaEncoder(nn.Module):
     def __init__(
         self,
         input_size: int,
-        output_size: int = 256,
+        output_size: int = 512,
         num_blocks: int = 6,
         dropout_rate: float = 0.1,
         positional_dropout_rate: float = 0.1,
@@ -212,6 +337,9 @@ class MambaEncoder(nn.Module):
         residual_in_fp32=False,
         device=None,
         dtype=None,
+        lookahead_kernel: int = 0,
+        interctc_layer_idx: List[int] = [],
+        interctc_use_conditioning: bool = False,
     ):
         assert check_argument_types()
         super().__init__()
@@ -223,6 +351,10 @@ class MambaEncoder(nn.Module):
             self.embed = CausalConv1dSubsampling(input_size, output_size, 3, bias=True)
         elif input_layer == "causal_conv2d":
             self.embed = CausalConv2dSubsampling(input_size, output_size, (3, 3), bias=True)
+        elif input_layer == "conv2d_12":
+            self.embed = Conv2dSubsampling5(input_size, output_size, dropout_rate)
+        elif input_layer == "conv2d_18":
+            self.embed = Conv2dSubsampling7(input_size, output_size, dropout_rate)
         elif input_layer == "linear":
             self.embed = torch.nn.Sequential(
                 torch.nn.Linear(input_size, output_size),
@@ -280,15 +412,32 @@ class MambaEncoder(nn.Module):
             d_model, eps=norm_epsilon, **factory_kwargs
         )
 
+        if lookahead_kernel > 0:
+            self.depthwise_conv = nn.Conv1d(
+                output_size,
+                output_size,
+                lookahead_kernel,
+                stride=1,
+                padding=lookahead_kernel // 2,
+                groups=output_size,
+                bias=True,
+            )
+
         output_size_embed = 256
         self._output_size = output_size_embed
         self.encoder_out_embed = torch.nn.Sequential(
                 torch.nn.Linear(output_size, output_size_embed),
                 torch.nn.LayerNorm(output_size_embed),
             )
-        
+
         if self.normalize_before:
-            self.after_norm = LayerNorm(output_size_embed)
+            self.after_norm = LayerNorm(output_size)
+        
+        self.interctc_layer_idx = interctc_layer_idx
+        if len(interctc_layer_idx) > 0:
+            assert 0 < min(interctc_layer_idx) and max(interctc_layer_idx) <= num_blocks
+        self.interctc_use_conditioning = interctc_use_conditioning
+        self.conditioning_layer = None
 
         self.apply(
             partial(
@@ -333,6 +482,8 @@ class MambaEncoder(nn.Module):
             xs_pad = xs_pad
         elif (
             isinstance(self.embed, Conv2dSubsampling)
+            or isinstance(self.embed, Conv2dSubsampling5)
+            or isinstance(self.embed, Conv2dSubsampling7)
             or isinstance(self.embed, CausalConv1dSubsampling)
             or isinstance(self.embed, CausalConv2dSubsampling)
         ):
@@ -349,13 +500,75 @@ class MambaEncoder(nn.Module):
             xs_pad = self.embed(xs_pad)
 
         residual = None
-        for layer in self.layers:
-            xs_pad, residual = layer(
-                xs_pad, residual, inference_params=inference_params
-            )
+        # for layer in self.layers:
+        #     xs_pad, residual = layer(
+        #         xs_pad, residual, inference_params=inference_params
+        #     )
+        # if not self.fused_add_norm:
+        #     residual = (xs_pad + residual) if residual is not None else xs_pad
+        #     xs_pad = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+        # else:
+        #     # Set prenorm=False here since we don't need the residual
+        #     fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
+        #     xs_pad = fused_add_norm_fn(
+        #         xs_pad,
+        #         self.norm_f.weight,
+        #         self.norm_f.bias,
+        #         eps=self.norm_f.eps,
+        #         residual=residual,
+        #         prenorm=False,
+        #         residual_in_fp32=self.residual_in_fp32,
+        #     )
+
+        intermediate_outs = []
+        if len(self.interctc_layer_idx) == 0:
+            for layer in self.layers:
+                xs_pad, residual = layer(xs_pad, residual, inference_params=inference_params)
+        else:
+            for layer_idx, layer in enumerate(self.layers):
+                xs_pad, residual = layer(xs_pad, residual, inference_params=inference_params)
+
+                if layer_idx + 1 in self.interctc_layer_idx:
+                    encoder_out = xs_pad
+                    if isinstance(encoder_out, tuple):
+                        encoder_out = encoder_out[0]
+
+                    if not self.fused_add_norm:
+                        residual = (encoder_out + residual) if residual is not None else encoder_out
+                        encoder_out = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+                    else:
+                        # Set prenorm=False here since we don't need the residual
+                        fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
+                        encoder_out = fused_add_norm_fn(
+                            encoder_out,
+                            self.norm_f.weight,
+                            self.norm_f.bias,
+                            eps=self.norm_f.eps,
+                            residual=residual,
+                            prenorm=False,
+                            residual_in_fp32=self.residual_in_fp32,
+                            )
+
+                    encoder_out = self.encoder_out_embed(encoder_out)
+
+                    intermediate_outs.append((layer_idx + 1, encoder_out))
+
+                    if self.interctc_use_conditioning:
+                        ctc_out = ctc.softmax(encoder_out)
+
+                        if isinstance(xs_pad, tuple):
+                            x, pos_emb = xs_pad
+                            x = x + self.conditioning_layer(ctc_out)
+                            xs_pad = (x, pos_emb)
+                        else:
+                            xs_pad = xs_pad + self.conditioning_layer(ctc_out) 
+        
+        if isinstance(xs_pad, tuple):
+            xs_pad = xs_pad[0]
+        
         if not self.fused_add_norm:
-            residual = (xs_pad + residual) if residual is not None else xs_pad
-            xs_pad = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+                residual = (xs_pad + residual) if residual is not None else xs_pad
+                xs_pad = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
         else:
             # Set prenorm=False here since we don't need the residual
             fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
@@ -367,18 +580,22 @@ class MambaEncoder(nn.Module):
                 residual=residual,
                 prenorm=False,
                 residual_in_fp32=self.residual_in_fp32,
-            )
-        if isinstance(xs_pad, tuple):
-            xs_pad = xs_pad[0]
+                )
         
+        if hasattr(self, "depthwise_conv"):
+            xs_pad = self.depthwise_conv(xs_pad.transpose(1, 2)).transpose(1, 2)
+
         xs_pad = self.encoder_out_embed(xs_pad)
+
         if self.normalize_before:
             xs_pad = self.after_norm(xs_pad)
         # logging.info(f'xs_pad: {xs_pad.device}, {xs_pad.dtype}')
         # logging.info(f'xs_pad: {xs_pad.shape}')
-        xs_pad = xs_pad[:, 5:, :]
+        xs_pad = xs_pad
         # logging.info(f'xs_pad: {xs_pad.shape}')
-        olens = masks.squeeze(1).sum(1)-5
+        olens = masks.squeeze(1).sum(1)
+        if len(intermediate_outs) > 0:
+            return (xs_pad, intermediate_outs), olens, None
 
         return xs_pad, olens, None
 

@@ -23,7 +23,7 @@ from espnet.nets.pytorch_backend.transformer.positionwise_feed_forward import (
 )
 from espnet.nets.pytorch_backend.transformer.repeat import repeat
 from espnet.nets.scorer_interface import BatchScorerInterface
-
+import logging
 
 class BaseTransformerDecoder(AbsDecoder, BatchScorerInterface):
     """Base class of Transfomer decoder module.
@@ -61,7 +61,6 @@ class BaseTransformerDecoder(AbsDecoder, BatchScorerInterface):
         assert check_argument_types()
         super().__init__()
         attention_dim = encoder_output_size
-
         if input_layer == "embed":
             self.embed = torch.nn.Sequential(
                 torch.nn.Embedding(vocab_size, attention_dim),
@@ -261,8 +260,8 @@ class TransformerDecoder(BaseTransformerDecoder):
         )
 
         attention_dim = encoder_output_size
-        if encoder_output_size != 256:
-            attention_dim = 256
+        # if encoder_output_size != 256:
+        #     attention_dim = 256
         self.decoders = repeat(
             num_blocks,
             lambda lnum: DecoderLayer(

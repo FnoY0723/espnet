@@ -3,7 +3,7 @@
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 17:30:10
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-04-30 22:49:55
+ # @LastEditTime: 2024-05-20 09:37:06
  # @FilePath: /espnet/egs2/aishell/asr1/run_unimodal.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
@@ -18,7 +18,7 @@ train_set=train
 valid_set=dev
 test_sets="test"
 
-asr_config=conf/train_asr_streaming_uma_conformer.yaml
+asr_config=conf/train_asr_uma_mamba.yaml
 inference_config=conf/decode_asr_unimodal_attention.yaml
 
 lm_config=conf/train_lm_transformer.yaml

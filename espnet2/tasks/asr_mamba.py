@@ -505,6 +505,7 @@ class ASRTask(AbsTask):
         # 5. Post-encoder block
         # NOTE(kan-bayashi): Use getattr to keep the compatibility
         encoder_output_size = encoder.output_size()
+        logging.info(f"Encoder output size: {encoder_output_size }")
         if getattr(args, "postencoder", None) is not None:
             postencoder_class = postencoder_choices.get_class(args.postencoder)
             postencoder = postencoder_class(

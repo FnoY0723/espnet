@@ -61,6 +61,20 @@ enc_out_length = []
 uma_out_length = []
 text_length = []
 
+# 初始化颜色列表
+colors = []
+
+# 在色环中选择30种不同的色相
+for i in range(20):
+    # 使用HSV颜色空间的色相
+    hue = i / 20
+    
+    # 将HSV颜色转换为RGB颜色
+    color = plt.cm.hsv(hue)
+    
+    # 添加颜色到列表中
+    colors.append(color)
+
 class Speech2Text:
     """Speech2Text class
 
@@ -330,9 +344,9 @@ class Speech2Text:
             # 截取指定频率范围的功率谱
             power_crop =power[:idx_max, :]
 
-            plt.figure(figsize=(10, 20))
-            spec = gridspec.GridSpec(ncols=1, nrows=4,
-                            height_ratios=[1, 2, 1, 1])
+            plt.figure(figsize=(10, 12))
+            spec = gridspec.GridSpec(ncols=1, nrows=3,
+                            height_ratios=[1, 1, 1])
             plt.subplot(spec[0])
             librosa.display.specshow(librosa.power_to_db(power_crop, ref=np.max), y_axis='mel', x_axis='time', fmin = 0, fmax = 80,sr=sr, hop_length=hop_length)
             plt.xlabel('Time (s)')
@@ -366,10 +380,10 @@ class Speech2Text:
         logging.info("encoder out: " + str(enc_before.size()))
         # logging.info(str(enc))
 
-        if self.draw:
-            plt.subplot(spec[1])
-            plt.imshow(enc_before[0]-enc_before[0].min(),cmap='coolwarm',aspect="auto")
-            plt.xlim(0,enc_before.shape[1]-1)
+        # if self.draw:
+        #     plt.subplot(spec[1])
+        #     plt.imshow(enc_before[0]-enc_before[0].min(),cmap='coolwarm',aspect="auto")
+        #     plt.xlim(0,enc_before.shape[1]-1)
 
         enc, umalen, (chunk_counts,scalar_importance) = self.asr_model.uma(enc_before, enclen)
         # enc, umalen, chunk_counts = self.asr_model.uma(enc_before, enclen)
@@ -382,25 +396,37 @@ class Speech2Text:
 
         # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0))
         enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
+        ys_hat_posterior = (self.asr_model.ctc.softmax(enc).data)[0].cpu()
+        logging.info(f'ys_hat_posterior: {ys_hat_posterior.shape}')
         ys_hat = (self.asr_model.ctc.argmax(enc).data)[0].tolist()
-
-        logging.info(f'ys_hat: {ys_hat}')
+        no_repeat_ys_hat = list(set(ys_hat))
+        logging.info(f'no_repeat_ys_hat: {no_repeat_ys_hat}')
         token = self.converter.ids2tokens(ys_hat)
-        # text = self.tokenizer.tokens2text(token)
-        # logging.info(f'text: {len(text)}')
-        # logging.info(f'text: {text}')
+        token_no_repeat = self.converter.ids2tokens(no_repeat_ys_hat)
 
         if self.draw:
-            plt.subplot(spec[2])
-            alpha0 = scalar_importance[0].squeeze()
+            plt.subplot(spec[1])
+            alpha0 = scalar_importance[0].squeeze().cpu()
             plt.plot(alpha0, color='cyan',linewidth=2)
             for i in range(len(scalar_importance[1])):
                 text = self.tokenizer.tokens2text(token[i])
-                plt.text(scalar_importance[1][i], 0.6 if text == '<blank>' else 0.8, 'b' if text == '<blank>' else text, color='r', fontproperties=my_font, fontsize=15)
-            plt.vlines(scalar_importance[1], 0, 1, linestyles='dashed', colors='red')
+                plt.text(scalar_importance[1][i], 0.6 if text == '<blank>' else 0.8, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
+            plt.vlines(scalar_importance[1].cpu(), 0, 1, linestyles='dashed', colors='red')
             plt.ylim(0,1)
             # plt.ylim(0,max(alpha0)+1)
             plt.xlim(0,alpha0.shape[0]-1)
+
+            plt.subplot(spec[2])
+            for i in range(len(token_no_repeat)):
+                if token_no_repeat[i] == '<blank>':
+                    # plt.plot(ys_hat_posterior[:, no_repeat_ys_hat[i]], color=colors[i], linestyle='dashed', linewidth=1)
+                    continue
+                plt.plot(ys_hat_posterior[:,no_repeat_ys_hat[i]], color=colors[i], linewidth=1)
+                text = self.tokenizer.tokens2text(token_no_repeat[i])
+                plt.text(torch.argmax(ys_hat_posterior[:, no_repeat_ys_hat[i]])-0.5, 1.05, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
+            plt.ylim(0,1.2)
+            plt.xlim(0,enc.shape[1]-1)
+            plt.xticks(np.arange(0,enc.shape[1],step=1))
            
             # plt.subplot(spec[3])
             # # 自相关attention map
@@ -411,7 +437,7 @@ class Speech2Text:
             # alpha1 = scalar_importance[1].squeeze()
             # plt.imshow(alpha1, aspect="auto")
             # plt.xlim(0, alpha1.shape[0]-1)
-            image_dir = "./uma_chunk_finetune_images_0321"
+            image_dir = "./inference_delay_comparison_0509/uma_block_conformer_hard_images"
             if not os.path.exists(image_dir):
                 os.makedirs(image_dir)
             plt.savefig(os.path.join(image_dir,f'hyp_{self.k}.png'))
