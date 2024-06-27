@@ -5,7 +5,7 @@ LastEditTime: 2024-05-16 09:00:18
 FilePath: /espnet/espnet2/bin/inference_align.py
 '''
 import os
-os.environ["OMP_NUM_THREADS"] = str(16) # 限制进程数量，放在import torch和numpy之前。不加会导致程序占用特别多的CPU资源，使得服务器变卡。 
+os.environ["OMP_NUM_THREADS"] = str(4) # 限制进程数量，放在import torch和numpy之前。不加会导致程序占用特别多的CPU资源，使得服务器变卡。 
 # limit the threads to reduce cpu overloads, will speed up when there are lots of CPU cores on the running machine 
 
 import time
@@ -21,8 +21,6 @@ from typing import List
 import multiprocessing as mp
 
 json_file = '/data/home/RealisticAudio/codes/4_target_gen/asr_results/wenetspeech_asr_model/aligned_static_low_粗略对齐_correctDPRIR_downto8k_fy.json'
-scenes = ['scene_0305_LabOffice', 'scene_0306_A2park', 'scene_0307_c18two', 'scene_0308_badminton_court', 
-          'scene_0311_basketball', 'scene_0409_canteen', 'scene_0411_1号门大厅']
 
 def procss(files):
     
@@ -77,7 +75,7 @@ def init_env_var(gpus: List[int]):
 
 
 if __name__ == '__main__':
-    gpus = [0,1,2,3]
+    gpus = [0,1,2,3,4,5,6,7,8]
     
     mp.set_start_method('spawn')
 
@@ -98,7 +96,9 @@ if __name__ == '__main__':
     pbar.set_description('generating rirs')
     
     p = mp.Pool(processes=len(gpus), initializer=init_env_var, initargs=(queue,))    
-    filess=[files[:len(files)//4], files[len(files)//4:len(files)//2], files[len(files)//2:len(files)//2+len(files)//4], files[len(files)//2+len(files)//4:]]
+    filess=[files[:len(files)//8], files[len(files)//8:len(files)//4], files[len(files)//4:len(files)//4+len(files)//8], 
+             files[len(files)//4+len(files)//8:len(files)//2], files[len(files)//2:len(files)//2+len(files)//8], files[len(files)//2+len(files)//8:len(files)//2+len(files)//4], 
+             files[len(files)//2+len(files)//4: len(files)//2+len(files)//4+len(files)//8], files[len(files)//2+len(files)//4+len(files)//8:]]
     
     p.map(procss, filess)
     p.close()

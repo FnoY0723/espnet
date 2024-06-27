@@ -34,6 +34,7 @@ from espnet2.asr.encoder.unimodal_conformer_encoder import UnimodalConformerEnco
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 from espnet2.asr.encoder.conformer_chunk_encoder import ConformerChunkEncoder
+from espnet2.asr.encoder.conformer_mamba_encoder import ConformerMambaEncoder
 from espnet2.asr.encoder.contextual_block_conformer_encoder import (
     ContextualBlockConformerEncoder,
 )
@@ -155,6 +156,7 @@ encoder_choices = ClassChoices(
         unimodal_conformer = UnimodalConformerEncoder,
         conformer=ConformerEncoder,
         conformer_chunk=ConformerChunkEncoder,
+        conformer_mamba=ConformerMambaEncoder,
         transformer=TransformerEncoder,
         transformer_multispkr=TransformerEncoderMultiSpkr,
         contextual_block_transformer=ContextualBlockTransformerEncoder,
@@ -398,6 +400,13 @@ class ASRTask(AbsTask):
             help="Auxillary tasks to train on using CTC loss. ",
         )
 
+        parser.add_argument(
+            f"--uma_conf",
+            action=NestedDictAction,
+            default=dict(),
+            help=f"The keyword arguments for uma",
+        )
+
         for class_choices in cls.class_choices_list:
             # Append --<name> and --<name>_conf.
             # e.g. --encoder and --encoder_conf
@@ -569,7 +578,8 @@ class ASRTask(AbsTask):
             postencoder = None
 
         # UMA
-        uma = UMA(encoder_output_size, encoder_output_size)
+        # uma = UMA(input_size=encoder_output_size, **args.uma_conf)
+        uma = UMA(input_size=encoder_output_size, output_size=encoder_output_size)
 
         # 5. Decoder
         if getattr(args, "decoder", None) is not None:

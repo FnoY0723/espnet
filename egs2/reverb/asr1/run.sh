@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+###
+ # @Author: FnoY fangying@westlake.edu.cn
+ # @LastEditors: FnoY0723 fangying@westlake.edu.cn
+ # @LastEditTime: 2024-06-26 21:18:43
+ # @FilePath: /espnet/egs2/reverb/asr1/run.sh
+### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 set -e
@@ -10,7 +16,7 @@ set -o pipefail
 # WSJ0 + WSJ1 + WSJ cam0 (Clean speech only)
 train_set=tr_wsjcam0_si284
 valid_set=dt_mult_1ch
-test_sets="dt_real_8ch_beamformit dt_simu_8ch_beamformit et_real_8ch_beamformit et_simu_8ch_beamformit dt_real_1ch_wpe dt_simu_1ch_wpe et_real_1ch_wpe et_simu_1ch_wpe dt_real_1ch dt_simu_1ch et_real_1ch et_simu_1ch"
+test_sets="et_real_1ch"
 
 ./asr.sh \
     --lang "en" \
@@ -21,10 +27,11 @@ test_sets="dt_real_8ch_beamformit dt_simu_8ch_beamformit et_real_8ch_beamformit 
     --nbpe 80 \
     --audio_format flac \
     --nlsyms_txt data/nlsyms.txt \
-    --inference_config conf/decode.yaml \
-    --lm_config conf/train_lm_transformer.yaml \
+    --inference_config conf/tuning/decode.yaml \
+    --lm_config conf/tuning/train_lm_transformer.yaml \
     --asr_config conf/tuning/train_asr_transformer4.yaml \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
+    --inference_asr_model valid.acc.ave_10best.pth \
     --lm_train_text "${train_set}/text data/local/other_text/text" "$@"

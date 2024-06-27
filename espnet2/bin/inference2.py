@@ -5,7 +5,7 @@ LastEditTime: 2024-05-18 12:54:04
 FilePath: /espnet/espnet2/bin/inference2.py
 '''
 import os
-os.environ["OMP_NUM_THREADS"] = str(8) # 限制进程数量，放在import torch和numpy之前。不加会导致程序占用特别多的CPU资源，使得服务器变卡。 
+os.environ["OMP_NUM_THREADS"] = str(4) # 限制进程数量，放在import torch和numpy之前。不加会导致程序占用特别多的CPU资源，使得服务器变卡。 
 # limit the threads to reduce cpu overloads, will speed up when there are lots of CPU cores on the running machine 
 lang = 'zh'
 fs = 16000 
@@ -24,13 +24,12 @@ from typing import List
 import multiprocessing as mp
 import numpy as np
 
-json_file = '/data/home/RealisticAudio/codes/4_target_gen/asr_results/wenetspeech_asr_model/clean_raw_svn.json'
-scenes = ['scene_0305_LabOffice', 'scene_0306_A2park', 'scene_0307_c18two', 'scene_0308_badminton_court', 
-          'scene_0311_basketball', 'scene_0409_canteen', 'scene_0411_1号门大厅']
+aligned_results = '/data/home/RealisticAudio/codes/4_target_gen/aligned_static_high_精细对齐_correctDPRIR_mcnn_v16epoch219_filtered'
+aligned_name = aligned_results.split('/')[-1]
+json_file = f'/data/home/RealisticAudio/codes/4_target_gen/asr_results/wenetspeech_asr_model/{aligned_name}.json'
 
 def procss(files):
     
-
     def text_normalizer(text):
         text = text.upper()
         return text.translate(str.maketrans('', '', string.punctuation))
@@ -91,7 +90,7 @@ if __name__ == '__main__':
         queue.put(gid)
 
     all_files = []
-    for root, dirs, files in os.walk(f'/data/home/RealisticAudio/raw/clean/'):
+    for root, dirs, files in os.walk(aligned_results):
         for index, file in enumerate(files):
             if file.endswith('.wav'):
                 all_files.append(os.path.join(root, file))

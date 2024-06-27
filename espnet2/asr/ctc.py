@@ -96,6 +96,10 @@ class CTC(torch.nn.Module):
 
         return loss
 
+    def ctc_ys_hat(self, hs_pad):
+        ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
+        return ys_hat
+
     def softmax(self, hs_pad):
         """softmax of frame activations
 

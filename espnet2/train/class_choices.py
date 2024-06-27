@@ -1,3 +1,9 @@
+'''
+Author: FnoY fangying@westlake.edu.cn
+LastEditors: FnoY0723 fangying@westlake.edu.cn
+LastEditTime: 2024-06-18 16:23:10
+FilePath: /espnet/espnet2/train/class_choices.py
+'''
 from typing import Mapping, Optional, Tuple
 
 from typeguard import check_argument_types, check_return_type

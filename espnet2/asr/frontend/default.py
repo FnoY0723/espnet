@@ -113,6 +113,9 @@ class DefaultFrontend(AbsFrontend):
         # input_power: (Batch, [Channel,] Length, Freq)
         #       -> input_feats: (Batch, Length, Dim)
         input_feats, _ = self.logmel(input_power, feats_lens)
+        import logging
+        logging.info(f"input_feats: {input_feats}")
+        logging.info(f'{input_feats.max().item()}, {input_feats.min().item()}')
 
         return input_feats, feats_lens
 

@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+###
+ # @Author: FnoY fangying@westlake.edu.cn
+ # @LastEditors: FnoY0723 fangying@westlake.edu.cn
+ # @LastEditTime: 2024-06-25 10:04:58
+ # @FilePath: /espnet/egs2/aishell4/asr1/run.sh
+### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 set -e
@@ -18,7 +24,7 @@ use_wordlm=false
 
 ./asr.sh                                               \
     --lang zh                                          \
-    --audio_format wav                                 \
+    --audio_format flac                                 \
     --feats_type raw                                   \
     --ngpu 1                                           \
     --token_type char                                  \

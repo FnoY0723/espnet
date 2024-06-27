@@ -412,26 +412,82 @@ class MambaEncoder(nn.Module):
             d_model, eps=norm_epsilon, **factory_kwargs
         )
 
+        self.lookahead_kernel = lookahead_kernel
         if lookahead_kernel > 0:
-            self.depthwise_conv = nn.Conv1d(
+            # self.depthwise_conv = nn.Conv1d(
+            #     output_size,
+            #     output_size,
+            #     lookahead_kernel // 2 +1,
+            #     stride=1,
+            #     padding=lookahead_kernel // 4,
+            #     groups=output_size,
+            #     bias=True,
+            # )
+
+            # self.depthwise_conv2 = nn.Conv1d(
+            #     output_size,
+            #     output_size,
+            #     lookahead_kernel // 2 +1,
+            #     stride=1,
+            #     padding=lookahead_kernel // 4,
+            #     groups=output_size,
+            #     bias=True,
+            # )
+
+            # self.lookahead_cnn = nn.Conv1d(
+            #     output_size,
+            #     # output_size,
+            #     256,
+            #     lookahead_kernel//2 +1,
+            #     stride=1,
+            #     padding=0,
+            #     bias=True,
+            # )
+
+        
+            self.lookahead_cnn = nn.Conv1d(
                 output_size,
-                output_size,
+                # output_size,
+                256,
                 lookahead_kernel,
                 stride=1,
                 padding=lookahead_kernel // 2,
-                groups=output_size,
                 bias=True,
             )
 
+            # self.lookahead_cnn =  nn.Conv1d(
+            #         output_size,
+            #         256,
+            #         lookahead_kernel // 2 +1,
+            #         stride=1,
+            #         padding=lookahead_kernel // 4,
+            #         bias=True
+            #     )
+
+            activation_type = "swish"
+            self.activation = get_activation(activation_type)
+
+            # self.lookahead_cnn2 = nn.Conv1d(
+            #         256,
+            #         256,
+            #         lookahead_kernel // 2 +1,
+            #         stride=1,
+            #         padding=lookahead_kernel // 4,
+            #         bias=True
+            #     )
+
+            self.lookahead_norm = nn.LayerNorm(256)
+            
+
         output_size_embed = 256
         self._output_size = output_size_embed
-        self.encoder_out_embed = torch.nn.Sequential(
-                torch.nn.Linear(output_size, output_size_embed),
-                torch.nn.LayerNorm(output_size_embed),
-            )
+        
+        if not hasattr(self, "lookahead_cnn"):
+            self.encoder_out_embed = torch.nn.Sequential(
+                    torch.nn.Linear(output_size, output_size_embed),
+                    torch.nn.LayerNorm(output_size_embed),
+                )
 
-        if self.normalize_before:
-            self.after_norm = LayerNorm(output_size)
         
         self.interctc_layer_idx = interctc_layer_idx
         if len(interctc_layer_idx) > 0:
@@ -498,6 +554,11 @@ class MambaEncoder(nn.Module):
             xs_pad, masks = self.embed(xs_pad, masks)
         else:
             xs_pad = self.embed(xs_pad)
+
+        # if hasattr(self, "lookahead_cnn"):
+        #     xs_pad = self.lookahead_cnn(xs_pad.transpose(1, 2)).transpose(1, 2)
+        #     xs_pad = self.activation(xs_pad)
+        #     xs_pad = self.lookahead_norm(xs_pad)
 
         residual = None
         # for layer in self.layers:
@@ -584,14 +645,24 @@ class MambaEncoder(nn.Module):
         
         if hasattr(self, "depthwise_conv"):
             xs_pad = self.depthwise_conv(xs_pad.transpose(1, 2)).transpose(1, 2)
+            xs_pad = self.depthwise_conv2(xs_pad.transpose(1, 2)).transpose(1, 2)
+            xs_pad = self.activation(xs_pad)
 
-        xs_pad = self.encoder_out_embed(xs_pad)
 
-        if self.normalize_before:
-            xs_pad = self.after_norm(xs_pad)
+        if hasattr(self, "lookahead_cnn"):
+            # xs_pad = torch.nn.functional.pad(xs_pad, (0, 0, 0, self.lookahead_kernel // 2))
+            xs_pad = self.lookahead_cnn(xs_pad.transpose(1, 2)).transpose(1, 2)
+            xs_pad = self.activation(xs_pad)
+            # xs_pad = self.lookahead_cnn2(xs_pad.transpose(1, 2)).transpose(1, 2)
+            # xs_pad = self.activation(xs_pad)
+            xs_pad = self.lookahead_norm(xs_pad)
+
+        if hasattr(self, "encoder_out_embed"):
+            xs_pad = self.encoder_out_embed(xs_pad)
+
         # logging.info(f'xs_pad: {xs_pad.device}, {xs_pad.dtype}')
         # logging.info(f'xs_pad: {xs_pad.shape}')
-        xs_pad = xs_pad
+        # xs_pad = xs_pad
         # logging.info(f'xs_pad: {xs_pad.shape}')
         olens = masks.squeeze(1).sum(1)
         if len(intermediate_outs) > 0:

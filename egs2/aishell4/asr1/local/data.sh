@@ -10,7 +10,7 @@ log() {
     echo -e "$(date '+%Y-%m-%dT%H:%M:%S') (${fname}:${BASH_LINENO[0]}:${FUNCNAME[1]}) $*"
 }
 
-stage=0       # start from 0 if you need to start from data preparation
+stage=2       # start from 0 if you need to start from data preparation
 stop_stage=100
 FOLDER=git_aishell
 
@@ -79,7 +79,7 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ] ; then
         #/dataset_dir/corpora/aishell4/train_L/wav/20200707_L_R001S04C01.flac
         # ...
 
-        rm  ${AISHELL4}/$room_name/wav_list.txt
+        # rm  ${AISHELL4}/$room_name/wav_list.txt
         FILES="$PWD/${AISHELL4}/$room_name/wav/*"
         for f in $FILES
         do
@@ -93,7 +93,7 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ] ; then
         #/dataset_dir/corpora/aishell4/train_L/TextGrid/textgrid_list/20200706_L_R001S08C01.TextGrid
         # ...
 
-        rm ${AISHELL4}/$room_name/TextGrid_list.txt
+        # rm ${AISHELL4}/$room_name/TextGrid_list.txt
         FILES="$PWD/${AISHELL4}/$room_name/TextGrid/*.TextGrid"
         for f in $FILES
         do

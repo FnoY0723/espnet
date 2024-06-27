@@ -1,6 +1,6 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-05-22 11:46:30
+LastEditTime: 2024-06-20 20:00:28
 FilePath: /espnet/espnet2/asr/unimodal_attention_model.py
 '''
 import logging
@@ -265,11 +265,16 @@ class UAMASRModel(AbsESPnetModel):
             encoder_out = encoder_out[0]
 
         loss_ctc, cer_ctc = None, None
-        gaussian_w, gaussian_b = None, None
+        uma_reduction = None
+        text_vs_uma = None
+
+        # gaussian_w, gaussian_b = None, None
         stats = dict()
         
         # 3. unimodal attention module
         uma_out, uma_out_lens, chunk_counts = self.uma(encoder_out, encoder_out_lens)
+        stats["uma_reduction"] = (uma_out_lens.sum().item())/(encoder_out_lens.sum().item())
+        stats["text_vs_uma"] = (text_lengths.sum().item())/(uma_out_lens.sum().item())
         # stats["gaussian_w"] = gaussian_w
         # stats["gaussian_b"] = gaussian_b
         # logging.info("uma_out_length: "+ (str(uma_out_lens)))
@@ -286,6 +291,10 @@ class UAMASRModel(AbsESPnetModel):
 
         # 1. CTC branch
         if self.ctc_weight != 0.0:
+            # if stats["text_vs_uma"]>=1.0:
+            #     ys_hat = self.ctc.ctc_ys_hat(decoder_out)
+            #     loss_ctc = self.criterion_att(ys_hat, text)
+            # else:
             loss_ctc, cer_ctc = self._calc_ctc_loss(
                 decoder_out, decoder_out_lens, text, text_lengths
             )

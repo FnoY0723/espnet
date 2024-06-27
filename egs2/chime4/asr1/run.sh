@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 ###
  # @Author: FnoY fangying@westlake.edu.cn
- # @LastEditors: FnoY 1084585914@qq.com
- # @LastEditTime: 2024-01-29 19:11:02
+ # @LastEditors: FnoY0723 fangying@westlake.edu.cn
+ # @LastEditTime: 2024-06-26 21:07:46
  # @FilePath: /espnet/egs2/chime4/asr1/run.sh
 ### 
 ###
@@ -21,7 +21,7 @@ set -o pipefail
 train_set=tr05_multi_noisy_si284 # tr05_multi_noisy (original training data) or tr05_multi_noisy_si284 (add si284 data)
 valid_set=dt05_multi_isolated_1ch_track
 test_sets="\
-et05_real_isolated_1ch_track et05_simu_isolated_1ch_track \
+et05_real_isolated_1ch_track\
 "
 # dt05_real_beamformit_2mics dt05_simu_beamformit_2mics et05_real_beamformit_2mics et05_simu_beamformit_2mics \
 # dt05_real_beamformit_5mics dt05_simu_beamformit_5mics et05_real_beamformit_5mics et05_simu_beamformit_5mics \

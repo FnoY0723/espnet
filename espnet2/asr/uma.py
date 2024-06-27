@@ -1,7 +1,7 @@
 
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-05-09 19:26:39
+LastEditTime: 2024-06-24 19:23:27
 FilePath: /espnet/espnet2/asr/uma.py
 Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
 '''
@@ -11,6 +11,7 @@ from typing import Optional, Tuple
 import torch
 from typeguard import check_argument_types
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
+from espnet.nets.pytorch_backend.nets_utils import get_activation
 
 
 class UMA(torch.nn.Module):
@@ -22,6 +23,7 @@ class UMA(torch.nn.Module):
         self,
         input_size: int = 256,
         output_size: int = 256,
+        lookahead_kernel: int = 0,
     ):
         assert check_argument_types()
         super().__init__()
@@ -29,7 +31,48 @@ class UMA(torch.nn.Module):
         input_size = output_size
         self.chunk_wize = False
 
-        # self.before_norm = LayerNorm(input_size)
+        if lookahead_kernel > 0:
+            # self.depthwise_conv = nn.Conv1d(
+            #     output_size,
+            #     output_size,
+            #     lookahead_kernel,
+            #     stride=1,
+            #     padding=lookahead_kernel // 2,
+            #     groups=output_size,
+            #     bias=True,
+            # )
+
+            self.lookahead_cnn_uma = torch.nn.Conv1d(
+                output_size,
+                output_size,
+                lookahead_kernel,
+                stride=1,
+                padding=lookahead_kernel // 2,
+                bias=True,
+            )
+
+            # self.lookahead_cnn =  nn.Conv1d(
+            #         output_size,
+            #         256,
+            #         lookahead_kernel // 2 +1,
+            #         stride=1,
+            #         padding=lookahead_kernel // 4,
+            #         bias=True
+            #     )
+
+            activation_type = "swish"
+            self.activation = get_activation(activation_type)
+   
+            # self.lookahead_cnn2 = nn.Conv1d(
+            #         256,
+            #         256,
+            #         lookahead_kernel // 2 +1,
+            #         stride=1,
+            #         padding=lookahead_kernel // 4,
+            #         bias=True
+            #     )
+
+            self.lookahead_norm = torch.nn.LayerNorm(256)
 
         self.linear_sigmoid = torch.nn.Sequential(
             torch.nn.Linear(input_size, 1),
@@ -76,7 +119,16 @@ class UMA(torch.nn.Module):
         # xs_pad = self.before_norm(xs_pad)
         # uma_weights = self.gen_uma(xs_pad)
 
-        uma_weights = self.linear_sigmoid(xs_pad)
+        if hasattr(self, "lookahead_cnn_uma"):
+            xs_pad2 = self.lookahead_cnn_uma(xs_pad.transpose(1, 2)).transpose(1, 2)
+            xs_pad2 = self.activation(xs_pad2)
+            # xs_pad = self.activation(self.lookahead_norm(xs_pad))
+            # xs_pad = self.lookahead_cnn2(xs_pad.transpose(1, 2)).transpose(1, 2)
+            # xs_pad = self.activation(xs_pad)
+            xs_pad2 = self.lookahead_norm(xs_pad2)
+            uma_weights = self.linear_sigmoid(xs_pad2)
+        else:
+            uma_weights = self.linear_sigmoid(xs_pad)
 
         # Unimodal Detection
         scalar_before = uma_weights[:,:-1,:].detach() # (#batch, L-1, 1)
@@ -174,7 +226,16 @@ class UMA(torch.nn.Module):
         # xs_pad = self.before_norm(xs_pad)
         # uma_weights = self.gen_uma(xs_pad)
 
-        uma_weights = self.linear_sigmoid(xs_pad)
+        if hasattr(self, "lookahead_cnn_uma"):
+            xs_pad2 = self.lookahead_cnn_uma(xs_pad.transpose(1, 2)).transpose(1, 2)
+            xs_pad2 = self.activation(xs_pad2)
+            # xs_pad = self.activation(self.lookahead_norm(xs_pad))
+            # xs_pad = self.lookahead_cnn2(xs_pad.transpose(1, 2)).transpose(1, 2)
+            # xs_pad = self.activation(xs_pad)
+            xs_pad2 = self.lookahead_norm(xs_pad2)
+            uma_weights = self.linear_sigmoid(xs_pad2)
+        else:
+            uma_weights = self.linear_sigmoid(xs_pad)
 
         # Unimodal Detection
         scalar_before = uma_weights[:,:-1,:].detach() # (#batch, L-1, 1)

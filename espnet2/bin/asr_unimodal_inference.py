@@ -1,3 +1,9 @@
+'''
+Author: FnoY fangying@westlake.edu.cn
+LastEditors: FnoY0723 fangying@westlake.edu.cn
+LastEditTime: 2024-06-26 19:28:59
+FilePath: /espnet/espnet2/bin/asr_unimodal_inference.py
+'''
 #!/usr/bin/env python3
 import argparse
 import logging
@@ -292,7 +298,7 @@ class Speech2Text:
         self.enh_s2t_task = enh_s2t_task
         self.multi_asr = multi_asr
 
-        self.draw = False
+        self.draw = False 
         self.k=0
 
     @torch.no_grad()
@@ -396,6 +402,9 @@ class Speech2Text:
 
         # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0))
         enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
+        if isinstance(enc, tuple):
+            enc = enc[0]
+        logging.info("decoder out: " + str(enc.size()))
         ys_hat_posterior = (self.asr_model.ctc.softmax(enc).data)[0].cpu()
         logging.info(f'ys_hat_posterior: {ys_hat_posterior.shape}')
         ys_hat = (self.asr_model.ctc.argmax(enc).data)[0].tolist()
@@ -437,7 +446,7 @@ class Speech2Text:
             # alpha1 = scalar_importance[1].squeeze()
             # plt.imshow(alpha1, aspect="auto")
             # plt.xlim(0, alpha1.shape[0]-1)
-            image_dir = "./inference_delay_comparison_0509/uma_block_conformer_hard_images"
+            image_dir = "./inference_delay_comparison_0613/46.64_mamba_replace_MHSA_transfomer"
             if not os.path.exists(image_dir):
                 os.makedirs(image_dir)
             plt.savefig(os.path.join(image_dir,f'hyp_{self.k}.png'))
@@ -636,16 +645,34 @@ def inference(
         inference=True,
     )
 
+    # def _collate_fn(batch):
+    #     # logging.info(f'batch: {batch}')
+    #     keys, speech = list(zip(*batch))
+    #     keys = list(keys)
+    #     keys = ['_'.join(keys)]
+    #     # logging.info(f'keys: {keys}')
+    #     # logging.info(f'speech: {speech}')
+    #     speech = [item['speech'] for item in speech]
+    #     speech = [torch.from_numpy(s) for s in speech]
+    #     speech = torch.cat(speech).view(1, -1)
+
+    #     return keys, {'speech': speech}
+    
+    # from torch.utils.data import DataLoader
+    # loader = DataLoader(loader.dataset, batch_size=10, collate_fn=_collate_fn)
+
+
     # 7 .Start for-loop
     # FIXME(kamo): The output format should be discussed about
     with DatadirWriter(output_dir) as writer:
         for keys, batch in loader:
-
+            logging.info(f"\ninput: {keys}")
             assert isinstance(batch, dict), type(batch)
             assert all(isinstance(s, str) for s in keys), keys
             _bs = len(next(iter(batch.values())))
             assert len(keys) == _bs, f"{len(keys)} != {_bs}"
             batch = {k: v[0] for k, v in batch.items() if not k.endswith("_lengths")}
+
 
             # N-best list of (text, token, token_int, hyp_object)
             try:
