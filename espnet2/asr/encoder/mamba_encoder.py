@@ -327,7 +327,7 @@ class MambaEncoder(nn.Module):
         positional_dropout_rate: float = 0.1,
         input_layer: Optional[str] = "conv2d",
         pos_enc_class=PositionalEncoding,
-        normalize_before: bool = True,
+        normalize_before: bool = False,
         padding_idx: int = -1,
         ssm_cfg=None,
         norm_epsilon: float = 1e-5,
@@ -338,6 +338,7 @@ class MambaEncoder(nn.Module):
         device=None,
         dtype=None,
         lookahead_kernel: int = 0,
+        right_context: int = 0,
         interctc_layer_idx: List[int] = [],
         interctc_use_conditioning: bool = False,
     ):
@@ -380,6 +381,8 @@ class MambaEncoder(nn.Module):
         
 
         self.normalize_before = normalize_before
+        if self.normalize_before:
+            self.norm_before_mamba = LayerNorm(output_size)
         d_model = output_size
         n_layer = num_blocks
         # We change the order of residual and layer norm:
@@ -413,6 +416,9 @@ class MambaEncoder(nn.Module):
         )
 
         self.lookahead_kernel = lookahead_kernel
+        self.right_context = right_context
+        self.left_context = lookahead_kernel - 1 - self.right_context
+
         if lookahead_kernel > 0:
             # self.depthwise_conv = nn.Conv1d(
             #     output_size,
@@ -444,16 +450,26 @@ class MambaEncoder(nn.Module):
             #     bias=True,
             # )
 
-        
+            self.lookahead_cnn0 = nn.Conv1d(
+                output_size,
+                # output_size,
+                output_size,
+                11,
+                stride=1,
+                padding=0,
+                bias=True,
+            )
+
             self.lookahead_cnn = nn.Conv1d(
                 output_size,
                 # output_size,
                 256,
                 lookahead_kernel,
                 stride=1,
-                padding=lookahead_kernel // 2,
+                padding=0,
                 bias=True,
             )
+
 
             # self.lookahead_cnn =  nn.Conv1d(
             #         output_size,
@@ -467,6 +483,8 @@ class MambaEncoder(nn.Module):
             activation_type = "swish"
             self.activation = get_activation(activation_type)
 
+            self.dropout = torch.nn.Dropout(dropout_rate)
+
             # self.lookahead_cnn2 = nn.Conv1d(
             #         256,
             #         256,
@@ -476,7 +494,7 @@ class MambaEncoder(nn.Module):
             #         bias=True
             #     )
 
-            self.lookahead_norm = nn.LayerNorm(256)
+            self.lookahead_norm = LayerNorm(256)
             
 
         output_size_embed = 256
@@ -485,7 +503,8 @@ class MambaEncoder(nn.Module):
         if not hasattr(self, "lookahead_cnn"):
             self.encoder_out_embed = torch.nn.Sequential(
                     torch.nn.Linear(output_size, output_size_embed),
-                    torch.nn.LayerNorm(output_size_embed),
+                    LayerNorm(output_size_embed),
+                    torch.nn.Dropout(dropout_rate),
                 )
 
         
@@ -494,6 +513,7 @@ class MambaEncoder(nn.Module):
             assert 0 < min(interctc_layer_idx) and max(interctc_layer_idx) <= num_blocks
         self.interctc_use_conditioning = interctc_use_conditioning
         self.conditioning_layer = None
+        
 
         self.apply(
             partial(
@@ -555,6 +575,8 @@ class MambaEncoder(nn.Module):
         else:
             xs_pad = self.embed(xs_pad)
 
+        if hasattr(self, "norm_before_mamba"):
+            xs_pad = self.norm_before_mamba(xs_pad)
         # if hasattr(self, "lookahead_cnn"):
         #     xs_pad = self.lookahead_cnn(xs_pad.transpose(1, 2)).transpose(1, 2)
         #     xs_pad = self.activation(xs_pad)
@@ -650,9 +672,15 @@ class MambaEncoder(nn.Module):
 
 
         if hasattr(self, "lookahead_cnn"):
-            # xs_pad = torch.nn.functional.pad(xs_pad, (0, 0, 0, self.lookahead_kernel // 2))
+            xs_pad = torch.nn.functional.pad(xs_pad, (0, 0, 10, 0))
+            xs_pad = self.lookahead_cnn0(xs_pad.transpose(1, 2)).transpose(1, 2)
+            xs_pad = self.activation(xs_pad)
+            xs_pad = torch.nn.functional.pad(xs_pad, (0, 0, self.left_context, self.right_context))
             xs_pad = self.lookahead_cnn(xs_pad.transpose(1, 2)).transpose(1, 2)
             xs_pad = self.activation(xs_pad)
+            
+            xs_pad = self.dropout(xs_pad)
+            
             # xs_pad = self.lookahead_cnn2(xs_pad.transpose(1, 2)).transpose(1, 2)
             # xs_pad = self.activation(xs_pad)
             xs_pad = self.lookahead_norm(xs_pad)

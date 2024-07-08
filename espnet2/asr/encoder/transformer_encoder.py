@@ -197,7 +197,7 @@ class TransformerEncoder(AbsEncoder):
             num_blocks,
             lambda lnum: EncoderLayer(
                 output_size,
-                StreamingMultiHeadedAttention(
+                MultiHeadedAttention(
                     attention_heads, output_size, attention_dropout_rate
                 ),
                 positionwise_layer(*positionwise_layer_args),

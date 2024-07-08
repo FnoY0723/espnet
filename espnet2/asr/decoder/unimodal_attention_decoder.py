@@ -33,7 +33,7 @@ from espnet.nets.pytorch_backend.transformer.subsampling import (
 )
 
 from espnet2.asr.ctc import CTC
-
+from espnet.nets.pytorch_backend.nets_utils import get_activation
 
 class UnimodalAttentionDecoder(AbsDecoder):
     """Transformer encoder module.
@@ -86,9 +86,9 @@ class UnimodalAttentionDecoder(AbsDecoder):
 
         self.embed = torch.nn.Sequential(
             torch.nn.Linear(encoder_output_size, output_size),
-            torch.nn.LayerNorm(output_size),
+            LayerNorm(output_size),
             torch.nn.Dropout(dropout_rate),
-            torch.nn.ReLU(),
+            get_activation("swish"),
             pos_enc_class(output_size, positional_dropout_rate),
         )
         

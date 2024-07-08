@@ -2,8 +2,8 @@
 ###
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-04-28 17:33:51
- # @LastEditors: FnoY 1084585914@qq.com
- # @LastEditTime: 2024-01-26 20:56:13
+ # @LastEditors: FnoY0723 fangying@westlake.edu.cn
+ # @LastEditTime: 2024-07-03 10:44:57
  # @FilePath: /espnet/egs2/hkust/asr1/run_unimodal.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
@@ -26,12 +26,12 @@ valid_set=train_dev
 test_sets="dev"
 
 
-asr_config=conf/train_asr_uma_branchformer.yaml
+asr_config=conf/train_asr_uma_mamba.yaml
 inference_config=conf/decode_uma.yaml
 
 lm_config=conf/tuning/train_lm_transformer.yaml
 use_lm=false
-expdir=exp_uma_branchformer_12e_69
+expdir=exp_uma_mamba_0701
 inference_asr_model=valid.cer.ave_10best.pth
 use_streaming=false
 
@@ -42,8 +42,8 @@ speed_perturb_factors="0.9 1.0 1.1"
 ./asr_unimodal.sh                   \
     --use_streaming ${use_streaming}  \
     --nj 64 \
-    --inference_nj 64  \
-    --ngpu 2 \
+    --inference_nj 1  \
+    --ngpu 1 \
     --lang zh                                          \
     --audio_format flac                                \
     --feats_type raw                                   \

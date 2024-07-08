@@ -3,7 +3,7 @@
  # @Author: FnoY 1084585914@qq.com
  # @Date: 2023-03-28 11:50:24
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-05-09 13:34:53
+ # @LastEditTime: 2024-07-08 09:31:38
  # @FilePath: /espnet/egs2/aishell/asr1/run.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
@@ -34,7 +34,7 @@ speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr.sh \
     --nj 64 \
-    --inference_nj 1 \
+    --inference_nj 8 \
     --ngpu 1 \
     --lang zh \
     --audio_format "flac.ark" \

@@ -1,9 +1,3 @@
-'''
-Author: FnoY fangying@westlake.edu.cn
-LastEditors: FnoY0723 fangying@westlake.edu.cn
-LastEditTime: 2024-07-05 13:31:18
-FilePath: /espnet/espnet2/bin/asr_unimodal_inference.py
-'''
 #!/usr/bin/env python3
 import argparse
 import logging
@@ -24,7 +18,7 @@ from espnet2.asr.transducer.beam_search_transducer import (
 )
 from espnet2.asr.transducer.beam_search_transducer import Hypothesis as TransHypothesis
 from espnet2.fileio.datadir_writer import DatadirWriter
-from espnet2.tasks.asr_unimodal import ASRTask
+from espnet2.tasks.asr import ASRTask
 from espnet2.tasks.enh_s2t import EnhS2TTask
 from espnet2.tasks.lm import LMTask
 from espnet2.text.build_tokenizer import build_tokenizer
@@ -43,14 +37,7 @@ from espnet.nets.scorer_interface import BatchScorerInterface
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.nets.scorers.length_bonus import LengthBonus
 from espnet.utils.cli_utils import get_commandline_args
-
-import os
-from matplotlib import pyplot as plt
-from matplotlib.ticker import MaxNLocator
-import librosa
-import librosa.display
-from espnet2.main_funcs.calculate_all_attentions import calculate_all_attentions
-import math
+from espnet2.torch_utils.model_summary import model_summary
 
 try:
     from transformers import AutoModelForSeq2SeqLM
@@ -60,12 +47,16 @@ try:
 except ImportError:
     is_transformers_available = False
 
+import os
+from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
+import librosa
+import librosa.display
+from espnet2.main_funcs.calculate_all_attentions import calculate_all_attentions
+import math
 from matplotlib import font_manager
 my_font = font_manager.FontProperties(fname="/usr/share/fonts/truetype/wqy/wqy-microhei.ttc")
 
-enc_out_length = []
-uma_out_length = []
-text_length = []
 
 # 初始化颜色列表
 colors = []
@@ -80,6 +71,7 @@ for i in range(20):
     
     # 添加颜色到列表中
     colors.append(color)
+
 
 class Speech2Text:
     """Speech2Text class
@@ -147,8 +139,20 @@ class Speech2Text:
         asr_model, asr_train_args = task.build_model_from_file(
             asr_train_config, asr_model_file, device
         )
+
+        if enh_s2t_task:
+            asr_model.inherite_attributes(
+                inherite_s2t_attrs=[
+                    "ctc",
+                    "decoder",
+                    "eos",
+                    "joint_network",
+                    "sos",
+                    "token_list",
+                    "use_transducer_decoder",
+                ]
+            )
         asr_model.to(dtype=getattr(torch, dtype)).eval()
-        print(asr_model)
 
         if quantize_asr_model:
             logging.info("Use quantized asr model for decoding.")
@@ -159,6 +163,9 @@ class Speech2Text:
 
         decoder = asr_model.decoder
 
+        logging.info(model_summary(asr_model.encoder))
+        # logging.info(model_summary(asr_model.decoder))
+        
         ctc = CTCPrefixScorer(ctc=asr_model.ctc, eos=asr_model.eos)
         token_list = asr_model.token_list
         scorers.update(
@@ -197,59 +204,142 @@ class Speech2Text:
         scorers["ngram"] = ngram
 
         # 4. Build BeamSearch object
-    
-        beam_search_transducer = None
-        hugging_face_model = None
-        hugging_face_linear_in = None
-
-        weights = dict(
-            decoder=1.0 - ctc_weight,
-            ctc=ctc_weight,
-            lm=lm_weight,
-            ngram=ngram_weight,
-            length_bonus=penalty,
-        )
-
-        beam_search = BeamSearch(
-            beam_size=beam_size,
-            weights=weights,
-            scorers=scorers,
-            sos=asr_model.sos,
-            eos=asr_model.eos,
-            vocab_size=len(token_list),
-            token_list=token_list,
-            pre_beam_score_key=None if ctc_weight == 1.0 else "full",
-        )
-
-        # TODO(karita): make all scorers batchfied
-        if batch_size == 1:
-            non_batch = [
-                k
-                for k, v in beam_search.full_scorers.items()
-                if not isinstance(v, BatchScorerInterface)
+        if asr_model.use_transducer_decoder:
+            # In multi-blank RNNT, we assume all big blanks are
+            # just before the standard blank in token_list
+            multi_blank_durations = getattr(
+                asr_model, "transducer_multi_blank_durations", []
+            )[::-1] + [1]
+            multi_blank_indices = [
+                asr_model.blank_id - i + 1
+                for i in range(len(multi_blank_durations), 0, -1)
             ]
-            if len(non_batch) == 0:
-                if streaming:
-                    beam_search.__class__ = BatchBeamSearchOnlineSim
-                    beam_search.set_streaming_config(asr_train_config)
-                    logging.info(
-                        "BatchBeamSearchOnlineSim implementation is selected."
-                    )
-                else:
-                    beam_search.__class__ = BatchBeamSearch
-                    logging.info("BatchBeamSearch implementation is selected.")
-            else:
-                logging.warning(
-                    f"As non-batch scorers {non_batch} are found, "
-                    f"fall back to non-batch implementation."
+
+            if transducer_conf is None:
+                transducer_conf = {}
+
+            beam_search_transducer = BeamSearchTransducer(
+                decoder=asr_model.decoder,
+                joint_network=asr_model.joint_network,
+                beam_size=beam_size,
+                lm=scorers["lm"] if "lm" in scorers else None,
+                lm_weight=lm_weight,
+                multi_blank_durations=multi_blank_durations,
+                multi_blank_indices=multi_blank_indices,
+                token_list=token_list,
+                **transducer_conf,
+            )
+            beam_search = None
+            hugging_face_model = None
+            hugging_face_linear_in = None
+        elif (
+            decoder.__class__.__name__ == "HuggingFaceTransformersDecoder"
+            and hugging_face_decoder
+        ):
+            if not is_transformers_available:
+                raise ImportError(
+                    "`transformers` is not available."
+                    " Please install it via `pip install transformers`"
+                    " or `cd /path/to/espnet/tools && . ./activate_python.sh"
+                    " && ./installers/install_transformers.sh`."
                 )
 
-        beam_search.to(device=device, dtype=getattr(torch, dtype)).eval()
-        for scorer in scorers.values():
-            if isinstance(scorer, torch.nn.Module):
-                scorer.to(device=device, dtype=getattr(torch, dtype)).eval()
-        logging.info(f"Beam_search: {beam_search}")
-        logging.info(f"Decoding device={device}, dtype={dtype}")
+            hugging_face_model = AutoModelForSeq2SeqLM.from_pretrained(
+                decoder.model_name_or_path
+            )
+
+            hugging_face_model.lm_head.load_state_dict(decoder.lm_head.state_dict())
+
+            if hasattr(hugging_face_model, "model"):
+                hugging_face_model.model.decoder.load_state_dict(
+                    decoder.decoder.state_dict()
+                )
+                del hugging_face_model.model.encoder
+            else:
+                hugging_face_model.decoder.load_state_dict(decoder.decoder.state_dict())
+                del hugging_face_model.encoder
+
+            del asr_model.decoder.lm_head
+            del asr_model.decoder.decoder
+
+            hugging_face_linear_in = decoder.linear_in
+            hugging_face_model.to(device=device).eval()
+
+            beam_search = None
+            beam_search_transducer = None
+        else:
+            beam_search_transducer = None
+            hugging_face_model = None
+            hugging_face_linear_in = None
+
+            weights = dict(
+                decoder=1.0 - ctc_weight,
+                ctc=ctc_weight,
+                lm=lm_weight,
+                ngram=ngram_weight,
+                length_bonus=penalty,
+            )
+
+            if time_sync:
+                if not hasattr(asr_model, "ctc"):
+                    raise NotImplementedError(
+                        "BeamSearchTimeSync without CTC is not supported."
+                    )
+                if batch_size != 1:
+                    raise NotImplementedError(
+                        "BeamSearchTimeSync with batching is not yet supported."
+                    )
+                logging.info("BeamSearchTimeSync implementation is selected.")
+
+                scorers["ctc"] = asr_model.ctc
+                beam_search = BeamSearchTimeSync(
+                    beam_size=beam_size,
+                    weights=weights,
+                    scorers=scorers,
+                    sos=asr_model.sos,
+                    token_list=token_list,
+                )
+            else:
+                beam_search = BeamSearch(
+                    beam_size=beam_size,
+                    weights=weights,
+                    scorers=scorers,
+                    sos=asr_model.sos,
+                    eos=asr_model.eos,
+                    vocab_size=len(token_list),
+                    token_list=token_list,
+                    pre_beam_score_key=None if ctc_weight == 1.0 else "full",
+                )
+
+                # TODO(karita): make all scorers batchfied
+                if batch_size == 1:
+                    non_batch = [
+                        k
+                        for k, v in beam_search.full_scorers.items()
+                        if not isinstance(v, BatchScorerInterface)
+                    ]
+                    if len(non_batch) == 0:
+                        if streaming:
+                            beam_search.__class__ = BatchBeamSearchOnlineSim
+                            beam_search.set_streaming_config(asr_train_config)
+                            logging.info(
+                                "BatchBeamSearchOnlineSim implementation is selected."
+                            )
+                        else:
+                            beam_search.__class__ = BatchBeamSearch
+                            logging.info("BatchBeamSearch implementation is selected.")
+                    else:
+                        logging.warning(
+                            f"As non-batch scorers {non_batch} are found, "
+                            f"fall back to non-batch implementation."
+                        )
+
+            beam_search.to(device=device, dtype=getattr(torch, dtype)).eval()
+            for scorer in scorers.values():
+                if isinstance(scorer, torch.nn.Module):
+                    scorer.to(device=device, dtype=getattr(torch, dtype)).eval()
+            logging.info(f"Beam_search: {beam_search}")
+            logging.info(f"Decoding device={device}, dtype={dtype}")
 
         # 5. [Optional] Build Text converter: e.g. bpe-sym -> Text
         if token_type is None:
@@ -299,7 +389,6 @@ class Speech2Text:
         self.multi_asr = multi_asr
 
         self.draw = False
-        self.image_dir = './inference_delay_comparison_0613/mamba_kernel21_right10_1dropout'
         self.k=0
 
     @torch.no_grad()
@@ -326,7 +415,7 @@ class Speech2Text:
         # Input as audio signal
         if isinstance(speech, np.ndarray):
             speech = torch.tensor(speech)
-        
+
         if self.draw:
             from matplotlib import gridspec
             y = speech.cpu().numpy()
@@ -351,9 +440,9 @@ class Speech2Text:
             # 截取指定频率范围的功率谱
             power_crop =power[:idx_max, :]
 
-            plt.figure(figsize=(10, 12))
-            spec = gridspec.GridSpec(ncols=1, nrows=3,
-                            height_ratios=[1, 1, 1])
+            plt.figure(figsize=(10, 8))
+            spec = gridspec.GridSpec(ncols=1, nrows=2,
+                            height_ratios=[1, 1])
             plt.subplot(spec[0])
             librosa.display.specshow(librosa.power_to_db(power_crop, ref=np.max), y_axis='mel', x_axis='time', fmin = 0, fmax = 80,sr=sr, hop_length=hop_length)
             plt.xlabel('Time (s)')
@@ -363,10 +452,6 @@ class Speech2Text:
             plt.yticks(yticks, ytick_labels)
 
         # data: (Nsamples,) -> (1, Nsamples)
-        # logging.info("speech:" + str(speech.shape))
-        # speech = torch.nn.functional.pad(speech, (0, int(len(speech)/6)), "constant", 0)
-        # logging.info("speech:" + str(speech.shape))
-        # logging.info("nonzeroL: "+str(speech.nonzero().shape)) 
         speech = speech.unsqueeze(0).to(getattr(torch, self.dtype))
         # lengths: (1,)
         lengths = speech.new_full([1], dtype=torch.long, fill_value=speech.size(1))
@@ -377,129 +462,137 @@ class Speech2Text:
         batch = to_device(batch, device=self.device)
 
         # b. Forward Encoder
-        # self.asr_model.encoder.look_ahead = 8
-        # self.asr_model.encoder.block_size = 32
-        enc_before, enclen = self.asr_model.encode(**batch)
-        # logging.info(f'{self.asr_model.encoder.look_ahead}')
-        if isinstance(enc_before, tuple):
-            enc_before = enc_before[0]
-        enc_out_length.append(enc_before.size(1))
-        logging.info("encoder out: " + str(enc_before.size()))
-        # logging.info(str(enc))
+        enc, enclen = self.asr_model.encode(**batch)
 
-        # if self.draw:
-        #     plt.subplot(spec[1])
-        #     plt.imshow(enc_before[0]-enc_before[0].min(),cmap='coolwarm',aspect="auto")
-        #     plt.xlim(0,enc_before.shape[1]-1)
-
-        enc, umalen, (chunk_counts,scalar_importance) = self.asr_model.uma(enc_before, enclen)
-        # enc, umalen, chunk_counts = self.asr_model.uma(enc_before, enclen)
-        # logging.info(f'gaussian_w: {self.asr_model.uma.gaussian_w} gaussian_b: {self.asr_model.uma.gaussian_b}')
-        # logging.info(self.asr_model.uma.linear_sigmoid[0].state_dict())
-
-        uma_out_length.append(enc.size(1))
-        # logging.info("uma out: " + str(enc.size()))
-        # logging.info(str(enc))
-
-        # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0))
-        enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
-        if isinstance(enc, tuple):
-            enc = enc[0]
-        logging.info("decoder out: " + str(enc.size()))
         ys_hat_posterior = (self.asr_model.ctc.softmax(enc).data)[0].cpu()
         logging.info(f'ys_hat_posterior: {ys_hat_posterior.shape}')
         ys_hat = (self.asr_model.ctc.argmax(enc).data)[0].tolist()
         no_repeat_ys_hat = list(set(ys_hat))
         logging.info(f'no_repeat_ys_hat: {no_repeat_ys_hat}')
-        token = self.converter.ids2tokens(ys_hat)
-        token_no_repeat = self.converter.ids2tokens(no_repeat_ys_hat)
+        token = self.converter.ids2tokens(no_repeat_ys_hat)
 
         if self.draw:
             plt.subplot(spec[1])
-            alpha0 = scalar_importance[0].squeeze().cpu()
-            plt.plot(alpha0, color='cyan',linewidth=2)
-            for i in range(len(scalar_importance[1])):
-                text = self.tokenizer.tokens2text(token[i])
-                plt.text(scalar_importance[1][i], 0.6 if text == '<blank>' else 0.8, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
-            plt.vlines(scalar_importance[1].cpu(), 0, 1, linestyles='dashed', colors='red')
-            plt.ylim(0,1)
-            # plt.ylim(0,max(alpha0)+1)
-            plt.xlim(0,alpha0.shape[0]-1)
-
-            plt.subplot(spec[2])
-            for i in range(len(token_no_repeat)):
-                if token_no_repeat[i] == '<blank>':
+            # alpha0 = scalar_importance[0].squeeze()
+            # plt.plot(alpha0, color='cyan',linewidth=2)
+            for i in range(len(token)):
+                if token[i] == '<blank>':
                     # plt.plot(ys_hat_posterior[:, no_repeat_ys_hat[i]], color=colors[i], linestyle='dashed', linewidth=1)
                     continue
                 plt.plot(ys_hat_posterior[:,no_repeat_ys_hat[i]], color=colors[i], linewidth=1)
-                text = self.tokenizer.tokens2text(token_no_repeat[i])
-                plt.text(torch.argmax(ys_hat_posterior[:, no_repeat_ys_hat[i]])-0.5, 1.05, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
+                text = self.tokenizer.tokens2text(token[i])
+                plt.text(torch.argmax(ys_hat_posterior[:, no_repeat_ys_hat[i]])-2, 1.05, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
+            # plt.vlines(scalar_importance[1], 0, 1, linestyles='dashed', colors='red')
             plt.ylim(0,1.2)
             plt.xlim(0,enc.shape[1]-1)
-            plt.xticks(np.arange(0,enc.shape[1],step=1))
            
-            # plt.subplot(spec[3])
-            # # 自相关attention map
-            # # scores = torch.matmul(enc_before[0], enc_before[0].transpose(-2, -1)) / math.sqrt(256)
-            # # attn = torch.softmax(scores, dim=-1)  # (batch, head, time1, time2)
-            # # alpha1 = attn.squeeze()
-            # # qk attention map
-            # alpha1 = scalar_importance[1].squeeze()
-            # plt.imshow(alpha1, aspect="auto")
-            # plt.xlim(0, alpha1.shape[0]-1)
-            if not os.path.exists(self.image_dir):
-                os.makedirs(self.image_dir)
-            plt.savefig(os.path.join(self.image_dir,f'hyp_{self.k}.png'))
+            image_dir = "./inference_delay_comparison_0509/causal_attention_auxiliary_training_images"
+            if not os.path.exists(image_dir):
+                os.makedirs(image_dir)
+            plt.savefig(os.path.join(image_dir,f'hyp_{self.k}.png'))
             self.k = self.k+1
-        # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc, chunk_counts)
-        # Normal ASR
-        if isinstance(enc, tuple):
-            enc = enc[0]
-        assert len(enc) == 1, len(enc)
-        logging.info("decoder out: " + str(enc.size()))
-        # logging.info(str(enc))
 
-        # c. Passed the encoder result and the beam search
-        results = self._decode_single_sample(enc[0])
-        assert check_return_type(results)
+        if self.multi_asr:
+            enc = enc.unbind(dim=1)  # (batch, num_inf, ...) -> num_inf x [batch, ...]
+        if self.enh_s2t_task or self.multi_asr:
+            # Enh+ASR joint task or Multispkr ASR task
+            # NOTE (Wangyou): the return type in this case is List[default_return_type]
+            if self.multi_asr:
+                num_spk = getattr(self.asr_model, "num_inf", 1)
+            else:
+                num_spk = getattr(self.asr_model.enh_model, "num_spk", 1)
+            assert len(enc) == num_spk, (len(enc), num_spk)
+            results = []
+            for spk, enc_spk in enumerate(enc, 1):
+                logging.info(f"=== [{str(self.asr_model.__class__)}] Speaker {spk} ===")
+                if isinstance(enc_spk, tuple):
+                    enc_spk = enc_spk[0]
+                assert len(enc_spk) == 1, len(enc_spk)
+
+                # c. Passed the encoder result and the beam search
+                ret = self._decode_single_sample(enc_spk[0])
+                assert check_return_type(ret)
+                results.append(ret)
+
+        else:
+            # Normal ASR
+            if isinstance(enc, tuple):
+                enc = enc[0]
+            assert len(enc) == 1, len(enc)
+
+            # c. Passed the encoder result and the beam search
+            results = self._decode_single_sample(enc[0])
+            assert check_return_type(results)
+
         return results
 
     def _decode_single_sample(self, enc: torch.Tensor):
-        # if hasattr(self.beam_search.nn_dict, "decoder"):
-        #     if isinstance(self.beam_search.nn_dict.decoder, S4Decoder):
-        #         # Setup: required for S4 autoregressive generation
-        #         for module in self.beam_search.nn_dict.decoder.modules():
-        #             if hasattr(module, "setup_step"):
-        #                 module.setup_step()
-        nbest_hyps = self.beam_search(
-            x=enc, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
-        )
+        if self.beam_search_transducer:
+            logging.info("encoder output length: " + str(enc.shape[0]))
+            nbest_hyps = self.beam_search_transducer(enc)
 
-        hyp = nbest_hyps[0]
-        logging.info(f'hyp.yseq: {hyp.yseq}')
+            best = nbest_hyps[0]
+            logging.info(f"total log probability: {best.score:.2f}")
+            logging.info(
+                f"normalized log probability: {best.score / len(best.yseq):.2f}"
+            )
+            logging.info(
+                "best hypo: " + "".join(self.converter.ids2tokens(best.yseq[1:])) + "\n"
+            )
+        elif self.hugging_face_model:
+            decoder_start_token_id = (
+                self.hugging_face_model.config.decoder_start_token_id
+            )
+            yseq = self.hugging_face_model.generate(
+                encoder_outputs=ModelOutput(
+                    last_hidden_state=self.hugging_face_linear_in(enc).unsqueeze(0)
+                ),
+                use_cache=True,
+                decoder_start_token_id=decoder_start_token_id,
+                num_beams=self.hugging_face_beam_size,
+                max_length=self.hugging_face_decoder_max_length,
+            )
+            nbest_hyps = [Hypothesis(yseq=yseq[0])]
+            logging.info(
+                "best hypo: "
+                + "".join(self.converter.ids2tokens(nbest_hyps[0].yseq[1:]))
+                + "\n"
+            )
+        else:
+            if hasattr(self.beam_search.nn_dict, "decoder"):
+                if isinstance(self.beam_search.nn_dict.decoder, S4Decoder):
+                    # Setup: required for S4 autoregressive generation
+                    for module in self.beam_search.nn_dict.decoder.modules():
+                        if hasattr(module, "setup_step"):
+                            module.setup_step()
+            nbest_hyps = self.beam_search(
+                x=enc, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
+            )
+
+        nbest_hyps = nbest_hyps[: self.nbest]
 
         results = []
-        
-        assert isinstance(hyp, (Hypothesis, TransHypothesis)), type(hyp)
+        for hyp in nbest_hyps:
+            assert isinstance(hyp, (Hypothesis, TransHypothesis)), type(hyp)
 
-        # remove sos/eos and get results
-        last_pos = None if self.asr_model.use_transducer_decoder else -1
-        if isinstance(hyp.yseq, list):
-            token_int = hyp.yseq[1:last_pos]
-        else:
-            token_int = hyp.yseq[1:last_pos].tolist()
+            # remove sos/eos and get results
+            last_pos = None if self.asr_model.use_transducer_decoder else -1
+            if isinstance(hyp.yseq, list):
+                token_int = hyp.yseq[1:last_pos]
+            else:
+                token_int = hyp.yseq[1:last_pos].tolist()
 
-        # remove blank symbol id, which is assumed to be 0
-        token_int = list(filter(lambda x: x != 0, token_int))
+            # remove blank symbol id, which is assumed to be 0
+            token_int = list(filter(lambda x: x != 0, token_int))
 
-        # Change integer-ids to tokens
-        token = self.converter.ids2tokens(token_int)
+            # Change integer-ids to tokens
+            token = self.converter.ids2tokens(token_int)
 
-        if self.tokenizer is not None:
-            text = self.tokenizer.tokens2text(token)
-        else:
-            text = None
-        results.append((text, token, token_int, hyp))
+            if self.tokenizer is not None:
+                text = self.tokenizer.tokens2text(token)
+            else:
+                text = None
+            results.append((text, token, token_int, hyp))
 
         return results
 
@@ -645,34 +738,15 @@ def inference(
         inference=True,
     )
 
-    # def _collate_fn(batch):
-    #     # logging.info(f'batch: {batch}')
-    #     keys, speech = list(zip(*batch))
-    #     keys = list(keys)
-    #     keys = ['_'.join(keys)]
-    #     # logging.info(f'keys: {keys}')
-    #     # logging.info(f'speech: {speech}')
-    #     speech = [item['speech'] for item in speech]
-    #     speech = [torch.from_numpy(s) for s in speech]
-    #     speech = torch.cat(speech).view(1, -1)
-
-    #     return keys, {'speech': speech}
-    
-    # from torch.utils.data import DataLoader
-    # loader = DataLoader(loader.dataset, batch_size=10, collate_fn=_collate_fn)
-
-
     # 7 .Start for-loop
     # FIXME(kamo): The output format should be discussed about
     with DatadirWriter(output_dir) as writer:
         for keys, batch in loader:
-            logging.info(f"\ninput: {keys}")
             assert isinstance(batch, dict), type(batch)
             assert all(isinstance(s, str) for s in keys), keys
             _bs = len(next(iter(batch.values())))
             assert len(keys) == _bs, f"{len(keys)} != {_bs}"
             batch = {k: v[0] for k, v in batch.items() if not k.endswith("_lengths")}
-
 
             # N-best list of (text, token, token_int, hyp_object)
             try:
@@ -681,23 +755,46 @@ def inference(
                 logging.warning(f"Utterance {keys} {e}")
                 hyp = Hypothesis(score=0.0, scores={}, states={}, yseq=[])
                 results = [[" ", ["<space>"], [2], hyp]] * nbest
+                if enh_s2t_task:
+                    num_spk = getattr(speech2text.asr_model.enh_model, "num_spk", 1)
+                    results = [results for _ in range(num_spk)]
 
             # Only supporting batch_size==1
             key = keys[0]
-            # Normal ASR
-            for n, (text, token, token_int, hyp) in zip(
-                range(1, nbest + 1), results
-            ):
-                # Create a directory: outdir/{n}best_recog
-                ibest_writer = writer[f"{n}best_recog"]
+            if enh_s2t_task or multi_asr:
+                # Enh+ASR joint task
+                for spk, ret in enumerate(results, 1):
+                    for n, (text, token, token_int, hyp) in zip(
+                        range(1, nbest + 1), ret
+                    ):
+                        # Create a directory: outdir/{n}best_recog_spk?
+                        ibest_writer = writer[f"{n}best_recog"]
 
-                # Write the result to each file
-                ibest_writer["token"][key] = " ".join(token)
-                ibest_writer["token_int"][key] = " ".join(map(str, token_int))
-                ibest_writer["score"][key] = str(hyp.score)
+                        # Write the result to each file
+                        ibest_writer[f"token_spk{spk}"][key] = " ".join(token)
+                        ibest_writer[f"token_int_spk{spk}"][key] = " ".join(
+                            map(str, token_int)
+                        )
+                        ibest_writer[f"score_spk{spk}"][key] = str(hyp.score)
 
-                if text is not None:
-                    ibest_writer["text"][key] = text
+                        if text is not None:
+                            ibest_writer[f"text_spk{spk}"][key] = text
+
+            else:
+                # Normal ASR
+                for n, (text, token, token_int, hyp) in zip(
+                    range(1, nbest + 1), results
+                ):
+                    # Create a directory: outdir/{n}best_recog
+                    ibest_writer = writer[f"{n}best_recog"]
+
+                    # Write the result to each file
+                    ibest_writer["token"][key] = " ".join(token)
+                    ibest_writer["token_int"][key] = " ".join(map(str, token_int))
+                    ibest_writer["score"][key] = str(hyp.score)
+
+                    if text is not None:
+                        ibest_writer["text"][key] = text
 
 
 def get_parser():
@@ -912,11 +1009,6 @@ def main(cmd=None):
     kwargs.pop("config", None)
     inference(**kwargs)
 
-    logging.info("enc_out_length: "+str(enc_out_length))
-    logging.info(str(sum(enc_out_length)))
-    logging.info("uma_out_length: "+str(uma_out_length))
-    logging.info(str(sum(uma_out_length)))
-    logging.info(str(sum(uma_out_length)/sum(enc_out_length)))
 
 if __name__ == "__main__":
     main()

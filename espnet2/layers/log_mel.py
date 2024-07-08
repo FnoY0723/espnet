@@ -1,3 +1,9 @@
+'''
+Author: FnoY fangying@westlake.edu.cn
+LastEditors: FnoY0723 fangying@westlake.edu.cn
+LastEditTime: 2024-07-03 15:28:30
+FilePath: /espnet/espnet2/layers/log_mel.py
+'''
 from typing import Tuple
 
 import librosa
@@ -61,7 +67,9 @@ class LogMel(torch.nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # feat: (B, T, D1) x melmat: (D1, D2) -> mel_feat: (B, T, D2)
         mel_feat = torch.matmul(feat, self.melmat)
-        mel_feat = torch.clamp(mel_feat, min=1e-10)
+        
+        mel_feat = torch.clamp(mel_feat, min=1e-10) 
+        # mel_feat = torch.clamp(mel_feat, min=1e-5)
 
         if self.log_base is None:
             logmel_feat = mel_feat.log()

@@ -2,7 +2,7 @@
 ###
  # @Author: FnoY fangying@westlake.edu.cn
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-06-26 21:07:46
+ # @LastEditTime: 2024-07-05 16:26:29
  # @FilePath: /espnet/egs2/chime4/asr1/run.sh
 ### 
 ###
@@ -47,7 +47,7 @@ expdir=exp_branchformer_utterance_mvn
     --nlsyms_txt data/nlsyms.txt           \
     --token_type char                      \
     --feats_type raw                       \
-    --audio_format flac.ark                \
+    --audio_format flac                \
     --asr_config "${asr_config}"           \
     --inference_config "${inference_config}"     \
     --lm_config "${lm_config}"             \
