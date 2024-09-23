@@ -1,7 +1,7 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
 LastEditors: FnoY0723 fangying@westlake.edu.cn
-LastEditTime: 2024-07-05 13:31:18
+LastEditTime: 2024-09-03 22:30:38
 FilePath: /espnet/espnet2/bin/asr_unimodal_inference.py
 '''
 #!/usr/bin/env python3
@@ -66,6 +66,8 @@ my_font = font_manager.FontProperties(fname="/usr/share/fonts/truetype/wqy/wqy-m
 enc_out_length = []
 uma_out_length = []
 text_length = []
+utt_id = None
+all_latency = []
 
 # 初始化颜色列表
 colors = []
@@ -161,8 +163,13 @@ class Speech2Text:
 
         ctc = CTCPrefixScorer(ctc=asr_model.ctc, eos=asr_model.eos)
         token_list = asr_model.token_list
+        # scorers.update(
+        #     decoder=decoder,
+        #     ctc=ctc,
+        #     length_bonus=LengthBonus(len(token_list)),
+        # )
         scorers.update(
-            decoder=decoder,
+            decoder=None,
             ctc=ctc,
             length_bonus=LengthBonus(len(token_list)),
         )
@@ -298,9 +305,11 @@ class Speech2Text:
         self.enh_s2t_task = enh_s2t_task
         self.multi_asr = multi_asr
 
+        self.calculate_latency = True
         self.draw = False
-        self.image_dir = './inference_delay_comparison_0613/mamba_kernel21_right10_1dropout'
+        self.image_dir = './inference_delay_comparison_0813/mamba_uma_la0'
         self.k=0
+        self.cutoff_uma = False
 
     @torch.no_grad()
     def __call__(
@@ -321,12 +330,32 @@ class Speech2Text:
             text, token, token_int, hyp
 
         """
+        
         assert check_argument_types()
 
         # Input as audio signal
         if isinstance(speech, np.ndarray):
             speech = torch.tensor(speech)
         
+        if self.calculate_latency:
+            import textgrid
+            if 'BAC' in utt_id:
+                text_grid_path = f'/data/home/fangying/espnet/egs2/aishell/asr1/downloads/forced_alignment/test/{utt_id[6:11]}/{utt_id}.TextGrid'
+            elif 'AT' in utt_id:
+                text_grid_path = f'/data/home/fangying/aishell2/AISHELL-DEV-TEST-SET/Android/test/forced_alignments/{utt_id[1:6]}/{utt_id}.TextGrid'
+            elif 'IT' in utt_id:
+                text_grid_path = f'/data/home/fangying/aishell2/AISHELL-DEV-TEST-SET/iOS/test/forced_alignments/{utt_id[1:6]}/{utt_id}.TextGrid'
+            elif 'MT' in utt_id:
+                text_grid_path = f'/data/home/fangying/aishell2/AISHELL-DEV-TEST-SET/Mic/test/forced_alignments/{utt_id[1:6]}/{utt_id}.TextGrid'
+            else:
+                text_grid_path = None
+            
+            logging.info(f"text_grid_path: {text_grid_path}")
+            utt_tg = textgrid.TextGrid.fromFile(text_grid_path)[0]
+
+        # if self.k % 10 == 0:
+        #     self.draw = True
+
         if self.draw:
             from matplotlib import gridspec
             y = speech.cpu().numpy()
@@ -351,16 +380,30 @@ class Speech2Text:
             # 截取指定频率范围的功率谱
             power_crop =power[:idx_max, :]
 
-            plt.figure(figsize=(10, 12))
-            spec = gridspec.GridSpec(ncols=1, nrows=3,
-                            height_ratios=[1, 1, 1])
+            plt.figure(figsize=(10, 8))
+            spec = gridspec.GridSpec(ncols=1, nrows=2,
+                            height_ratios=[1, 1])
             plt.subplot(spec[0])
+
             librosa.display.specshow(librosa.power_to_db(power_crop, ref=np.max), y_axis='mel', x_axis='time', fmin = 0, fmax = 80,sr=sr, hop_length=hop_length)
-            plt.xlabel('Time (s)')
+            # plt.xlabel('Time (s)')
             plt.ylabel('Frequency')
-            yticks = [0, 20, 40, 60, 80]
-            ytick_labels = [0, 20, 40, 60, 80]
+            plt.xlabel('')
+            plt.ylim(1, 80)
+            yticks = [20, 40, 60, 80]
+            ytick_labels = [20, 40, 60, 80]
             plt.yticks(yticks, ytick_labels)
+            plt.xticks([])
+
+            if self.calculate_latency:
+                for interval in utt_tg[:-1]:
+                    start_time = interval.minTime
+                    end_time = interval.maxTime
+                    text = interval.mark    
+                    # print(start_time, end_time, text)
+                    plt.vlines(start_time, 1, 80, color='g', linestyles='dashed')
+                    plt.vlines(end_time, 1, 80, color='g', linestyles='dashed')
+                    plt.text(end_time, -3, text, fontsize=16, color='g', ha='right', va='center',  fontproperties=my_font)
 
         # data: (Nsamples,) -> (1, Nsamples)
         # logging.info("speech:" + str(speech.shape))
@@ -392,51 +435,154 @@ class Speech2Text:
         #     plt.imshow(enc_before[0]-enc_before[0].min(),cmap='coolwarm',aspect="auto")
         #     plt.xlim(0,enc_before.shape[1]-1)
 
-        enc, umalen, (chunk_counts,scalar_importance) = self.asr_model.uma(enc_before, enclen)
-        # enc, umalen, chunk_counts = self.asr_model.uma(enc_before, enclen)
-        # logging.info(f'gaussian_w: {self.asr_model.uma.gaussian_w} gaussian_b: {self.asr_model.uma.gaussian_b}')
-        # logging.info(self.asr_model.uma.linear_sigmoid[0].state_dict())
+        if self.cutoff_uma:
+            uma_weights = self.asr_model.uma.linear_sigmoid(enc_before)
+            # Unimodal Detection
+            scalar_before = uma_weights[:,:-1,:].detach() # (#batch, L-1, 1)
+            scalar_after = uma_weights[:,1:,:].detach() # (#batch, L-1, 1)
+            scalar_before = torch.nn.functional.pad(scalar_before,(0,0,1,0))    # (#batch, L, 1)
+            scalar_after = torch.nn.functional.pad(scalar_after,(0,0,0,1))  # (#batch, L, 1)
 
-        uma_out_length.append(enc.size(1))
-        # logging.info("uma out: " + str(enc.size()))
-        # logging.info(str(enc))
+            mask = (uma_weights.lt(scalar_before)) & (uma_weights.lt(scalar_after)) # bool tensor (#batch, L, 1)
+            mask = mask.reshape(uma_weights.shape[0], -1) # bool tensor (#batch, L)
+            mask[:,0] = True
+            mask[:,-1] = False
+            valley_index_start = mask.nonzero()[:,1] # (k,1); [0,3,7,...,]
+            
+            ###### # test regressive inference
+            # mask[:,0] = False
+            # mask[:,-1] = True
+            # valley_index_end = mask.nonzero()[:,1]+1
+            # new_seperation = valley_index_end
 
-        # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0))
-        enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
-        if isinstance(enc, tuple):
-            enc = enc[0]
+            mask2 = (uma_weights.gt(scalar_before)) & (uma_weights.gt(scalar_after)) # bool tensor (#batch, L, 1)
+            mask2 = mask2.reshape(uma_weights.shape[0], -1) # bool tensor (#batch, L)
+            mask2[:,0] = False
+            mask2[:,-1] = True
+            valley_peak = mask2.nonzero()[:,1] # (k,1); [5,9,...]
+
+            if valley_index_start.shape[0] > valley_peak.shape[0]:
+                new_seperation = torch.zeros_like(valley_index_start)
+                new_seperation[0] = valley_index_start[1]+1
+                new_seperation[1:] = valley_peak+1
+            else:
+                new_seperation = valley_peak+1
+            
+            uma_out_length.append(new_seperation.size(0))
+            
+            enc = torch.zeros(enc_before.shape[0], new_seperation.shape[0], enc_before.shape[2]).to(enc_before.device)
+            
+            for i in range(0, len(new_seperation)-1):
+                new_enc_before = enc_before[:,:new_seperation[i]+1,:]
+                new_enclen = new_enc_before.size(1)
+                new_enc, new_umalen, _ = self.asr_model.uma(new_enc_before, new_enclen)
+                new_enc, _ = self.asr_model.decoder(new_enc, new_umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
+                if isinstance(new_enc, tuple):
+                    new_enc = new_enc[0]
+                # enc[:, i, :] = new_enc[:, -1, :]
+                enc[:, i-1, :] = new_enc[:, -2, :]
+            ##########
+            new_enc_before = enc_before[:,:new_seperation[-1],:]
+            new_enclen = new_enc_before.size(1)
+            new_enc, new_umalen, _ = self.asr_model.uma(new_enc_before, new_enclen)
+            new_enc, _ = self.asr_model.decoder(new_enc, new_umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
+            if isinstance(new_enc, tuple):
+                new_enc = new_enc[0]
+            # enc[:, -1, :] = new_enc[:, -1, :]
+            enc[:, -2:, :] = new_enc[:, -2:, :]
+
+
+        else:
+            enc, umalen, (chunk_counts,scalar_importance) = self.asr_model.uma(enc_before, enclen)
+            # enc, umalen, chunk_counts = self.asr_model.uma(enc_before, enclen)
+            # logging.info(f'gaussian_w: {self.asr_model.uma.gaussian_w} gaussian_b: {self.asr_model.uma.gaussian_b}')
+            # logging.info(self.asr_model.uma.linear_sigmoid[0].state_dict())
+
+            uma_out_length.append(enc.size(1))
+
+            # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0))
+            enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc)
+            if isinstance(enc, tuple):
+                enc = enc[0]
+
         logging.info("decoder out: " + str(enc.size()))
-        ys_hat_posterior = (self.asr_model.ctc.softmax(enc).data)[0].cpu()
-        logging.info(f'ys_hat_posterior: {ys_hat_posterior.shape}')
+        # ys_hat_posterior = (self.asr_model.ctc.softmax(enc).data)[0].cpu()
+        # logging.info(f'ys_hat_posterior: {ys_hat_posterior.shape}')
         ys_hat = (self.asr_model.ctc.argmax(enc).data)[0].tolist()
         no_repeat_ys_hat = list(set(ys_hat))
-        logging.info(f'no_repeat_ys_hat: {no_repeat_ys_hat}')
+        # logging.info(f'no_repeat_ys_hat: {no_repeat_ys_hat}')
         token = self.converter.ids2tokens(ys_hat)
-        token_no_repeat = self.converter.ids2tokens(no_repeat_ys_hat)
+        logging.info(f'token: {token}')
+        # token_no_repeat = self.converter.ids2tokens(no_repeat_ys_hat)
+
+
+        if self.calculate_latency:
+            if self.cutoff_uma:
+                valleys = new_seperation.squeeze().cpu().tolist()
+            else:
+                valleys = scalar_importance[1][1].squeeze().cpu()
+                valleys = valleys.tolist()
+                # valleys = valleys.tolist()[1:]
+                # valleys.append(enc_before.size(1)-1)
+
+            utt_latency = {}
+            for interval in utt_tg:
+                start_time = interval.minTime
+                end_time = interval.maxTime
+                text = interval.mark
+                if text in token:
+                    index = token.index(text)
+                    # if index+1 < len(valleys):
+                    #     reg_time = (valleys[index+1]-1)*32
+                    # else:
+                    #     reg_time = (valleys[index]-1)*32
+                    reg_time = (valleys[index]-1)*32
+                    latency = reg_time - end_time*1000
+                    # # for chunk_conformer
+                    # if (valleys[index]-1)%20!= 0  and (valleys[index]) != enc_before.size(1):
+                    #     latency = latency + (20-(valleys[index]-1)%20)*32
+
+                    if  start_time*1000 <= reg_time:
+                        all_latency.append(latency)
+                        utt_latency[text] = int(latency)
+                        logging.info(f'latency: {text} {int(latency)}ms')
+
 
         if self.draw:
+            np.save(os.path.join(self.image_dir,f'enc_before_{self.k}.npy'), enc_before.cpu().numpy())
+            if not os.path.exists(self.image_dir):
+                os.makedirs(self.image_dir)
             plt.subplot(spec[1])
             alpha0 = scalar_importance[0].squeeze().cpu()
+            np.save(os.path.join(self.image_dir,f'uma_weights_{self.k}.npy'), alpha0.numpy())
+            np.save(os.path.join(self.image_dir,f'valleys_{self.k}.npy'), scalar_importance[1][0].cpu().numpy())
+            np.save(os.path.join(self.image_dir,f'token_{self.k}.npy'), token)
+            np.save(os.path.join(self.image_dir,f'utt_latency_{self.k}.npy'), utt_latency)
             plt.plot(alpha0, color='cyan',linewidth=2)
-            for i in range(len(scalar_importance[1])):
+            for i in range(len(scalar_importance[1][0])):
                 text = self.tokenizer.tokens2text(token[i])
-                plt.text(scalar_importance[1][i], 0.6 if text == '<blank>' else 0.8, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
-            plt.vlines(scalar_importance[1].cpu(), 0, 1, linestyles='dashed', colors='red')
+                if self.calculate_latency:
+                    if utt_latency.get(text, None) is not None:
+                        plt.text(valleys[i]-2, 0.9, str(utt_latency[text]), color='black', ha='right',fontproperties=my_font, fontsize=10)
+                        utt_latency.pop(text)
+                plt.text(scalar_importance[1][0][i], 0.6 if text == '<blank>' else 0.8, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
+            plt.vlines(scalar_importance[1][0].cpu(), 0, 1, linestyles='dashed', colors='red')
             plt.ylim(0,1)
             # plt.ylim(0,max(alpha0)+1)
             plt.xlim(0,alpha0.shape[0]-1)
+            plt.ylabel(f'{self.image_dir.split("/")[-1]}')
 
-            plt.subplot(spec[2])
-            for i in range(len(token_no_repeat)):
-                if token_no_repeat[i] == '<blank>':
-                    # plt.plot(ys_hat_posterior[:, no_repeat_ys_hat[i]], color=colors[i], linestyle='dashed', linewidth=1)
-                    continue
-                plt.plot(ys_hat_posterior[:,no_repeat_ys_hat[i]], color=colors[i], linewidth=1)
-                text = self.tokenizer.tokens2text(token_no_repeat[i])
-                plt.text(torch.argmax(ys_hat_posterior[:, no_repeat_ys_hat[i]])-0.5, 1.05, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
-            plt.ylim(0,1.2)
-            plt.xlim(0,enc.shape[1]-1)
-            plt.xticks(np.arange(0,enc.shape[1],step=1))
+            # plt.subplot(spec[2])
+            # for i in range(len(token_no_repeat)):
+            #     if token_no_repeat[i] == '<blank>':
+            #         # plt.plot(ys_hat_posterior[:, no_repeat_ys_hat[i]], color=colors[i], linestyle='dashed', linewidth=1)
+            #         continue
+            #     plt.plot(ys_hat_posterior[:,no_repeat_ys_hat[i]], color=colors[i], linewidth=1)
+            #     text = self.tokenizer.tokens2text(token_no_repeat[i])
+            #     plt.text(torch.argmax(ys_hat_posterior[:, no_repeat_ys_hat[i]])-0.5, 1.05, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
+            # plt.ylim(0,1.2)
+            # plt.xlim(0,enc.shape[1]-1)
+            # plt.xticks(np.arange(0,enc.shape[1],step=1))
            
             # plt.subplot(spec[3])
             # # 自相关attention map
@@ -447,10 +593,17 @@ class Speech2Text:
             # alpha1 = scalar_importance[1].squeeze()
             # plt.imshow(alpha1, aspect="auto")
             # plt.xlim(0, alpha1.shape[0]-1)
-            if not os.path.exists(self.image_dir):
-                os.makedirs(self.image_dir)
+            
             plt.savefig(os.path.join(self.image_dir,f'hyp_{self.k}.png'))
             self.k = self.k+1
+            # self.draw = False
+
+        # self.k = self.k+1
+        # if self.k == 1000:
+        #     plt.close()
+        #     self.draw = False
+        #     os._exit(0)
+
         # enc, _ = self.asr_model.decoder(enc, umalen, torch.tensor(0), torch.tensor(0), self.asr_model.ctc, chunk_counts)
         # Normal ASR
         if isinstance(enc, tuple):
@@ -458,10 +611,9 @@ class Speech2Text:
         assert len(enc) == 1, len(enc)
         logging.info("decoder out: " + str(enc.size()))
         # logging.info(str(enc))
-
         # c. Passed the encoder result and the beam search
         results = self._decode_single_sample(enc[0])
-        assert check_return_type(results)
+        # assert check_return_type(results)
         return results
 
     def _decode_single_sample(self, enc: torch.Tensor):
@@ -471,19 +623,34 @@ class Speech2Text:
         #         for module in self.beam_search.nn_dict.decoder.modules():
         #             if hasattr(module, "setup_step"):
         #                 module.setup_step()
-        nbest_hyps = self.beam_search(
-            x=enc, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
-        )
 
-        hyp = nbest_hyps[0]
-        logging.info(f'hyp.yseq: {hyp.yseq}')
+        # nbest_hyps = self.beam_search(
+        #     x=enc, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
+        # )
+
+        # hyp = nbest_hyps[0]
+        # logging.info(f'hyp.yseq: {hyp.yseq}')
+
+        yseq = (self.asr_model.ctc.argmax(enc.unsqueeze(0)).data)[0].tolist()
+        y = [yseq[0]]  # 初始结果列表包含第一个元素
+        for item in yseq[1:]:
+            if item != y[-1]:  # 仅当当前元素与结果列表最后一个元素不同时，添加进结果列表
+                y.append(item)
+        
+        hyp = Hypothesis(
+                score=0.0,
+                scores=None,
+                states=None,
+                yseq=y,
+            )
 
         results = []
         
         assert isinstance(hyp, (Hypothesis, TransHypothesis)), type(hyp)
 
         # remove sos/eos and get results
-        last_pos = None if self.asr_model.use_transducer_decoder else -1
+        last_pos = None
+        # last_pos = None if self.asr_model.use_transducer_decoder else -1
         if isinstance(hyp.yseq, list):
             token_int = hyp.yseq[1:last_pos]
         else:
@@ -499,6 +666,7 @@ class Speech2Text:
             text = self.tokenizer.tokens2text(token)
         else:
             text = None
+        logging.info(f'best hypo: {text}' + "\n")
         results.append((text, token, token_int, hyp))
 
         return results
@@ -666,13 +834,16 @@ def inference(
     # FIXME(kamo): The output format should be discussed about
     with DatadirWriter(output_dir) as writer:
         for keys, batch in loader:
-            logging.info(f"\ninput: {keys}")
+            logging.info(f"input: {keys}")
+            
             assert isinstance(batch, dict), type(batch)
             assert all(isinstance(s, str) for s in keys), keys
             _bs = len(next(iter(batch.values())))
             assert len(keys) == _bs, f"{len(keys)} != {_bs}"
             batch = {k: v[0] for k, v in batch.items() if not k.endswith("_lengths")}
 
+            global utt_id
+            utt_id = keys[0]
 
             # N-best list of (text, token, token_int, hyp_object)
             try:
@@ -917,6 +1088,8 @@ def main(cmd=None):
     logging.info("uma_out_length: "+str(uma_out_length))
     logging.info(str(sum(uma_out_length)))
     logging.info(str(sum(uma_out_length)/sum(enc_out_length)))
+    if len(all_latency) > 0:
+        logging.info(f'average_latency: {sum(all_latency)/len(all_latency)}')
 
 if __name__ == "__main__":
     main()

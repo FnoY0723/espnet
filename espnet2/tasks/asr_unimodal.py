@@ -11,6 +11,7 @@ from espnet2.asr.uma import UMA
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.decoder.unimodal_attention_decoder import UnimodalAttentionDecoder
 from espnet2.asr.decoder.mamba_decoder import MambaDecoder
+from espnet2.asr.decoder.mamba2_decoder import Mamba2Decoder
 
 from espnet2.asr.decoder.hugging_face_transformers_decoder import (  # noqa: H301
     HuggingFaceTransformersDecoder,
@@ -29,6 +30,7 @@ from espnet2.asr.decoder.transformer_decoder import (
 from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.encoder.mamba_encoder import MambaEncoder
+from espnet2.asr.encoder.mamba2_encoder import Mamba2Encoder
 from espnet2.asr.encoder.unimodal_attention_encoder import UnimodalAttentionEncoder
 from espnet2.asr.encoder.unimodal_conformer_encoder import UnimodalConformerEncoder
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
@@ -152,6 +154,7 @@ encoder_choices = ClassChoices(
     "encoder",
     classes=dict(
         mamba=MambaEncoder,
+        mamba2=Mamba2Encoder,
         unimodal_attention = UnimodalAttentionEncoder,
         unimodal_conformer = UnimodalConformerEncoder,
         conformer=ConformerEncoder,
@@ -189,6 +192,7 @@ decoder_choices = ClassChoices(
     classes=dict(
         unimodal_transformer=UnimodalAttentionDecoder,
         mamba=MambaDecoder,
+        mamba2=Mamba2Decoder,
         transformer=TransformerDecoder,
         lightweight_conv=LightweightConvolutionTransformerDecoder,
         lightweight_conv2d=LightweightConvolution2DTransformerDecoder,
@@ -611,7 +615,7 @@ class ASRTask(AbsTask):
 
         # 6. CTC
         ctc = CTC(
-            odim=vocab_size, encoder_output_size=decoder.output_size(), **args.ctc_conf
+            odim=vocab_size, encoder_output_size=encoder_output_size, **args.ctc_conf
         )
 
         # 7. Build model

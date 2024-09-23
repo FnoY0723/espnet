@@ -10,7 +10,7 @@ log() {
     echo -e "$(date '+%Y-%m-%dT%H:%M:%S') (${fname}:${BASH_LINENO[0]}:${FUNCNAME[1]}) $*"
 }
 
-stage=2       # start from 0 if you need to start from data preparation
+stage=13       # start from 0 if you need to start from data preparation
 stop_stage=100
 FOLDER=git_aishell
 
@@ -127,7 +127,7 @@ fi
 wav_list_aishell4=${AISHELL4}/full_train/wav_list.txt
 text_grid_aishell4=${AISHELL4}/full_train/TextGrid_list.txt
 
-output_folder=$PWD/data/
+output_folder=$PWD/data
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] ; then
 
@@ -152,7 +152,8 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ] ; then
     FILES="$output_folder/train/wav/*"
     for f in $FILES
     do
-        g=$(echo $f | cut -d'/' -f 14 | cut -d'.' -f 1)
+        g=$(echo $f | cut -d'/' -f 12 | cut -d'.' -f 1)
+        log "creating wav.scp for $g"
         echo "$g" "$f" >> $output_folder/train/wav.scp
     done
 
@@ -167,7 +168,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ] ; then
     FILES="$output_folder/train/wav/*"
     for f in $FILES
     do
-        g=$(echo $f | cut -d'/' -f 14 | cut -d'.' -f 1)
+        g=$(echo $f | cut -d'/' -f 12 | cut -d'.' -f 1)
         echo "$g" "$g"  >> $output_folder/train/utt2spk  # we put speaker_id = utt_id
     done
 
@@ -188,6 +189,7 @@ fi
 if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ] ; then
     log "sorting files ... "
     sort data/train/utt2spk -o data/train/utt2spk
+    log "files sorted"
     # creating spk2utt from utt2spk
     utils/utt2spk_to_spk2utt.pl $output_folder/train/utt2spk > $output_folder/train/spk2utt
     sort data/train/wav.scp -o data/train/wav.scp
@@ -323,7 +325,7 @@ if [ ${stage} -le 13 ] && [ ${stop_stage} -ge 13 ] ; then
     FILES="$output_folder/test/wav/*"
     for f in $FILES
     do
-        g=$(echo $f | cut -d'/' -f 13 | cut -d'.' -f 1)
+        g=$(echo $f | cut -d'/' -f 12 | cut -d'.' -f 1)
         echo "$g" "$f" >> $output_folder/test/wav.scp
     done
 
@@ -334,7 +336,7 @@ if [ ${stage} -le 14 ] && [ ${stop_stage} -ge 14 ] ; then
     FILES="$output_folder/test/wav/*"
     for f in $FILES
     do
-        g=$(echo $f | cut -d'/' -f 13 | cut -d'.' -f 1)
+        g=$(echo $f | cut -d'/' -f 12 | cut -d'.' -f 1)
         echo "$g" "$g"  >> $output_folder/test/utt2spk  # we put speaker_id = utt_id
     done
 

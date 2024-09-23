@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 ###
  # @Author: FnoY fangying@westlake.edu.cn
- # @LastEditors: FnoY 1084585914@qq.com
- # @LastEditTime: 2024-01-22 21:01:10
+ # @LastEditors: FnoY0723 fangying@westlake.edu.cn
+ # @LastEditTime: 2024-08-19 23:26:29
  # @FilePath: /espnet/egs2/hkust/asr1/run.sh
 ### 
 # Set bash to 'debug' mode, it will exit on :
@@ -31,7 +31,7 @@ speed_perturb_factors="0.9 1.0 1.1"
 
 ./asr.sh                                               \
     --nj 64 \
-    --inference_nj 64  \
+    --inference_nj 16 \
     --ngpu 1 \
     --lang zh                                          \
     --audio_format flac                                \

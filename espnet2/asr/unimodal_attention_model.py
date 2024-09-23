@@ -1,6 +1,6 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-06-20 20:00:28
+LastEditTime: 2024-08-08 23:18:50
 FilePath: /espnet/espnet2/asr/unimodal_attention_model.py
 '''
 import logging
@@ -11,6 +11,7 @@ import torch
 from packaging.version import parse as V
 from typeguard import check_argument_types
 
+from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
 from espnet2.asr.uma import UMA
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
@@ -119,7 +120,7 @@ class UAMASRModel(AbsESPnetModel):
                 self.encoder.interctc_use_conditioning = False
         if self.encoder.interctc_use_conditioning:
             self.encoder.conditioning_layer = torch.nn.Linear(
-                vocab_size, 512
+                vocab_size, self.encoder.output_size()
             )
 
         self.uma = uma
@@ -187,6 +188,7 @@ class UAMASRModel(AbsESPnetModel):
 
             if not hasattr(self.decoder, "interctc_use_conditioning"):
                 self.decoder.interctc_use_conditioning = False
+                
             if self.decoder.interctc_use_conditioning:
                 self.decoder.conditioning_layer = torch.nn.Linear(
                     vocab_size, self.decoder.output_size()
@@ -265,6 +267,10 @@ class UAMASRModel(AbsESPnetModel):
             encoder_out = encoder_out[0]
 
         loss_ctc, cer_ctc = None, None
+        loss_enc_ctc, cer_enc_ctc = None, None
+        loss_blank = None
+        loss_pfr = None
+        loss_fast = None
         uma_reduction = None
         text_vs_uma = None
 
@@ -299,10 +305,53 @@ class UAMASRModel(AbsESPnetModel):
                 decoder_out, decoder_out_lens, text, text_lengths
             )
 
+            # loss_enc_ctc, cer_enc_ctc = self._calc_ctc_loss(
+            #     encoder_out, encoder_out_lens, text, text_lengths
+            # )
+            # stats["loss_enc_ctc"] = loss_enc_ctc.detach() if loss_enc_ctc is not None else None
+            # stats["cer_enc_ctc"] = cer_enc_ctc
+            
+
+            # ys_prob = -self.ctc.log_softmax(decoder_out)
+            # ys_idx = self.ctc.argmax(decoder_out)
+            
+            # sub_idx = ys_idx[:, 1:]
+            # zero_column = torch.zeros((ys_idx.shape[0], 1), dtype=ys_idx.dtype).to(ys_idx.device)
+            # penalty_idx = torch.cat((sub_idx, zero_column), dim=1)
+            # penalty_result = torch.zeros(ys_prob.shape, dtype=penalty_idx.dtype).to(penalty_idx.device)
+            # penalty_result.scatter_(2, penalty_idx.unsqueeze(-1), 1)
+            # penalty_result[:,:,0] = 0
+            
+            # summed_values = penalty_result * ys_prob
+            # summed_values = summed_values
+    
+            # sum_along_V = torch.sum(summed_values, dim=-1).masked_fill(~(ys_idx==0), 0)
+            # sum_along_T = torch.sum(sum_along_V, dim=-1)
+            # loss_fast = torch.mean(sum_along_T)*0.00001
+            # stats["loss_fast"] = loss_fast.detach() if loss_fast is not None else None
+
+
+            # ys_hat = self.ctc.ctc_ys_hat(decoder_out)
+            # # ys_hat = self.ctc.ctc_ys_hat(encoder_out)
+            # ys_hat = torch.nn.functional.log_softmax(ys_hat/10, dim=-1)
+            # left_probs = ys_hat[:,:-1,:]
+            # right_probs = ys_hat[:,1:,:]
+            # loss_pfr = torch.nn.functional.kl_div(left_probs, right_probs, reduction="none", log_target=True)
+            # mask = (make_pad_mask(decoder_out_lens)[:, :, None]).to(decoder_out.device)
+            # loss_pfr.masked_fill_(mask[:,1:], 0)
+            # loss_pfr = torch.sum(loss_pfr)/decoder_out.shape[0]*0.1
+            # stats["loss_pfr"] = loss_pfr.detach() if loss_pfr is not None else None
+            
+            # masks = (make_pad_mask(decoder_out_lens)[:, :, None]).to(decoder_out.device)
+            # ys_hat = self.ctc.softmax(decoder_out).masked_fill(masks, 0)
+            # loss_blank = torch.sum(ys_hat[:,:,0])/torch.sum(decoder_out_lens)
+            # stats["loss_blank"] = loss_blank.detach() if loss_blank is not None else None
+
             # Collect CTC branch stats
             stats["loss_ctc"] = loss_ctc.detach() if loss_ctc is not None else None
             stats["cer_ctc"] = cer_ctc
             stats["cer"] = cer_ctc
+
 
         # Encoder Intermediate CTC (optional)
         loss_interctc_enc = 0.0
@@ -391,6 +440,18 @@ class UAMASRModel(AbsESPnetModel):
             1 - self.interctc_weight_enc - self.interctc_weight_dec
         ) * loss_ctc + self.interctc_weight_enc * loss_interctc_enc + self.interctc_weight_dec * loss_interctc_dec
 
+        if loss_enc_ctc is not None:
+            loss = loss*0.7 + loss_enc_ctc*0.3
+        
+        if loss_fast is not None:
+            loss = loss + loss_fast
+        
+        if loss_pfr is not None:
+            loss = loss + loss_pfr
+        
+        if loss_blank is not None:
+            loss = loss + loss_blank
+            
         # Collect total loss stats
         stats["loss"] = loss.detach()
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
@@ -480,7 +541,7 @@ class UAMASRModel(AbsESPnetModel):
         assert speech_lengths.dim() == 1, speech_lengths.shape
 
         # for data-parallel
-        speech = speech[:, : speech_lengths.max()]
+        speech = speech[:, :  speech_lengths.max()]
 
         if self.frontend is not None:
             # Frontend

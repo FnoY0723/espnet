@@ -27,7 +27,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-from espnet2.asr.mamba_ssm.modules.mamba_simple import Mamba, Block
+from  espnet2.asr.mamba_ssm.modules.mamba_simple import Mamba, Block
 
 try:
     from espnet2.asr.mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 def create_block(
     d_model,
     ssm_cfg=None,
-    norm_epsilon=1e-5,
+    norm_epsilon=1e-12,
     rms_norm=False,
     residual_in_fp32=False,
     fused_add_norm=False,
@@ -98,48 +98,6 @@ def _init_weights(
                     p /= math.sqrt(n_residuals_per_layer * n_layer)
 
 
-class CausalConv1dSubsampling(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, bias=True):
-        super(CausalConv1dSubsampling, self).__init__()
-        self.padding = (kernel_size - 1)
-
-        self.subsample1 = nn.Sequential(
-            nn.Conv1d(
-                in_channels,
-                out_channels,
-                kernel_size=kernel_size,
-                padding=self.padding,
-                stride=2,
-                bias=bias,
-            ),
-            nn.ReLU(),
-        )
-
-        self.subsample2 = nn.Sequential(
-            nn.Conv1d(
-                out_channels,
-                out_channels,
-                kernel_size=kernel_size,
-                padding=self.padding,
-                stride=2,
-                # groups=out_channels,
-                bias=bias,
-            ),
-            nn.ReLU(),
-        )
-
-    def forward(self, x, x_mask):
-        x = x.transpose(1, 2)
-        x = self.subsample1(x)
-        if self.padding != 0:
-            x = x[:, :, :-self.padding]
-        x = self.subsample2(x)
-        if self.padding != 0:
-            x = x[:, :, :-self.padding]
-        x = x.transpose(1, 2)
-        if x_mask is None:
-            return x, None
-        return x, x_mask[:, :, :-2:2][:, :, :-2:2]
 
 
 class CausalConv2dSubsampling(nn.Module):
@@ -171,7 +129,12 @@ class CausalConv2dSubsampling(nn.Module):
             nn.ReLU(),
         )
 
-        self.out = torch.nn.Linear(out_channels * (((in_channels - 1) // 2 - 1) // 2), out_channels)
+        self.out = torch.nn.Sequential(
+            torch.nn.Linear(out_channels * (((in_channels - 1) // 2 - 1) // 2), out_channels),
+            torch.nn.Dropout(0.1),
+            # PositionalEncoding(out_channels, 0.1),
+        )
+        # self.out = torch.nn.Linear(out_channels * (((in_channels - 1) // 2 - 1) // 2), out_channels)
 
     def forward(self, x, x_mask):
         x = x.unsqueeze(1)  # (b, c, t, f)
@@ -188,8 +151,7 @@ class CausalConv2dSubsampling(nn.Module):
         return x, x_mask[:, :, :-2:2][:, :, :-2:2]
 
 
-
-class Conv2dSubsampling5(torch.nn.Module):
+class Conv2dSubsamplingM(torch.nn.Module):
     """Convolutional 2D subsampling (to 1/4 length).
 
     Args:
@@ -201,17 +163,16 @@ class Conv2dSubsampling5(torch.nn.Module):
     """
 
     def __init__(self, idim, odim, dropout_rate, pos_enc=None):
-        """lookahead 12*8=96ms"""
-        super(Conv2dSubsampling5, self).__init__()
+        """Construct an Conv2dSubsampling object."""
+        super(Conv2dSubsamplingM, self).__init__()
         self.conv = torch.nn.Sequential(
-            torch.nn.Conv2d(1, odim, (5, 3), 2),
+            torch.nn.Conv2d(1, odim, 3, 2),
             torch.nn.ReLU(),
-            torch.nn.Conv2d(odim, odim, (5, 3), 2),
+            torch.nn.Conv2d(odim, odim, 3, 2),
             torch.nn.ReLU(),
         )
         self.out = torch.nn.Sequential(
             torch.nn.Linear(odim * (((idim - 1) // 2 - 1) // 2), odim),
-            pos_enc if pos_enc is not None else PositionalEncoding(odim, dropout_rate),
         )
 
     def forward(self, x, x_mask):
@@ -229,14 +190,12 @@ class Conv2dSubsampling5(torch.nn.Module):
 
         """
         x = x.unsqueeze(1)  # (b, c, t, f)
-        # logging.info(f"Conv2dSubsampling5: input shape: {x.shape}")
         x = self.conv(x)
         b, c, t, f = x.size()
-        # logging.info(f"Conv2dSubsampling5: output shape: {x.shape}")
         x = self.out(x.transpose(1, 2).contiguous().view(b, t, c * f))
         if x_mask is None:
             return x, None
-        return x, x_mask[:, :, :-4:2][:, :, :-4:2]
+        return x, x_mask[:, :, :-2:2][:, :, :-2:2]
 
     def __getitem__(self, key):
         """Get item.
@@ -248,68 +207,7 @@ class Conv2dSubsampling5(torch.nn.Module):
         if key != -1:
             raise NotImplementedError("Support only `-1` (for `reset_parameters`).")
         return self.out[key]
-
-
-class Conv2dSubsampling7(torch.nn.Module):
-    """Convolutional 2D subsampling (to 1/4 length).
-
-    Args:
-        idim (int): Input dimension.
-        odim (int): Output dimension.
-        dropout_rate (float): Dropout rate.
-        pos_enc (torch.nn.Module): Custom position encoding layer.
-
-    """
-
-    def __init__(self, idim, odim, dropout_rate, pos_enc=None):
-        """lookahead 18*8=144ms"""
-        super(Conv2dSubsampling7, self).__init__()
-        self.conv = torch.nn.Sequential(
-            torch.nn.Conv2d(1, odim, (7, 3), 2),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(odim, odim, (7, 3), 2),
-            torch.nn.ReLU(),
-        )
-        self.out = torch.nn.Sequential(
-            torch.nn.Linear(odim * (((idim - 1) // 2 - 1) // 2), odim),
-            pos_enc if pos_enc is not None else PositionalEncoding(odim, dropout_rate),
-        )
-
-    def forward(self, x, x_mask):
-        """Subsample x.
-
-        Args:
-            x (torch.Tensor): Input tensor (#batch, time, idim).
-            x_mask (torch.Tensor): Input mask (#batch, 1, time).
-
-        Returns:
-            torch.Tensor: Subsampled tensor (#batch, time', odim),
-                where time' = time // 4.
-            torch.Tensor: Subsampled mask (#batch, 1, time'),
-                where time' = time // 4.
-
-        """
-        x = x.unsqueeze(1)  # (b, c, t, f)
-        # logging.info(f"Conv2dSubsampling7: input shape: {x.shape}")
-        x = self.conv(x)
-        # logging.info(f"Conv2dSubsampling7: output shape: {x.shape}")
-        b, c, t, f = x.size()
-        x = self.out(x.transpose(1, 2).contiguous().view(b, t, c * f))
-        if x_mask is None:
-            return x, None
-        return x, x_mask[:, :, :-6:2][:, :, :-6:2]
-
-    def __getitem__(self, key):
-        """Get item.
-
-        When reset_parameters() is called, if use_scaled_pos_enc is used,
-            return the positioning encoding.
-
-        """
-        if key != -1:
-            raise NotImplementedError("Support only `-1` (for `reset_parameters`).")
-        return self.out[key]
-
+    
 
 class MambaEncoder(nn.Module):
     """Transformer encoder module.
@@ -321,7 +219,7 @@ class MambaEncoder(nn.Module):
     def __init__(
         self,
         input_size: int,
-        output_size: int = 512,
+        output_size: int = 256,
         num_blocks: int = 6,
         dropout_rate: float = 0.1,
         positional_dropout_rate: float = 0.1,
@@ -330,7 +228,7 @@ class MambaEncoder(nn.Module):
         normalize_before: bool = False,
         padding_idx: int = -1,
         ssm_cfg=None,
-        norm_epsilon: float = 1e-5,
+        norm_epsilon: float = 1e-12,
         rms_norm: bool = False,
         initializer_cfg=None,
         fused_add_norm=False,
@@ -348,29 +246,12 @@ class MambaEncoder(nn.Module):
         factory_kwargs = {"device": device, "dtype": dtype}
         self.residual_in_fp32 = residual_in_fp32
 
-        if input_layer == "causal_conv1d":
-            self.embed = CausalConv1dSubsampling(input_size, output_size, 3, bias=True)
-        elif input_layer == "causal_conv2d":
+        if input_layer == "causal_conv2d":
             self.embed = CausalConv2dSubsampling(input_size, output_size, (3, 3), bias=True)
-        elif input_layer == "conv2d_12":
-            self.embed = Conv2dSubsampling5(input_size, output_size, dropout_rate)
-        elif input_layer == "conv2d_18":
-            self.embed = Conv2dSubsampling7(input_size, output_size, dropout_rate)
-        elif input_layer == "linear":
-            self.embed = torch.nn.Sequential(
-                torch.nn.Linear(input_size, output_size),
-                torch.nn.LayerNorm(output_size),
-                torch.nn.Dropout(dropout_rate),
-                torch.nn.ReLU(),
-                pos_enc_class(output_size, positional_dropout_rate),
-            )
         elif input_layer == "conv2d":
             self.embed = Conv2dSubsampling(input_size, output_size, dropout_rate)
-        elif input_layer == "embed":
-            self.embed = torch.nn.Sequential(
-                torch.nn.Embedding(input_size, output_size, padding_idx=padding_idx),
-                pos_enc_class(output_size, positional_dropout_rate),
-            )
+        elif input_layer == "conv2d_m":
+            self.embed = Conv2dSubsamplingM(input_size, output_size, dropout_rate)
         elif input_layer is None:
             if input_size == output_size:
                 self.embed = None
@@ -411,101 +292,59 @@ class MambaEncoder(nn.Module):
             ]
         )
 
+        # self.mamba_layer_dropout = torch.nn.Dropout(dropout_rate)
+
         self.norm_f = (nn.LayerNorm if not rms_norm else RMSNorm)(
             d_model, eps=norm_epsilon, **factory_kwargs
         )
 
+       
         self.lookahead_kernel = lookahead_kernel
         self.right_context = right_context
         self.left_context = lookahead_kernel - 1 - self.right_context
 
         if lookahead_kernel > 0:
-            # self.depthwise_conv = nn.Conv1d(
-            #     output_size,
-            #     output_size,
-            #     lookahead_kernel // 2 +1,
-            #     stride=1,
-            #     padding=lookahead_kernel // 4,
-            #     groups=output_size,
-            #     bias=True,
-            # )
 
-            # self.depthwise_conv2 = nn.Conv1d(
+            # self.lookahead_cnn0 = nn.Conv1d(
             #     output_size,
             #     output_size,
-            #     lookahead_kernel // 2 +1,
-            #     stride=1,
-            #     padding=lookahead_kernel // 4,
-            #     groups=output_size,
-            #     bias=True,
-            # )
-
-            # self.lookahead_cnn = nn.Conv1d(
-            #     output_size,
-            #     # output_size,
-            #     256,
-            #     lookahead_kernel//2 +1,
+            #     lookahead_kernel,
             #     stride=1,
             #     padding=0,
             #     bias=True,
             # )
 
-            self.lookahead_cnn0 = nn.Conv1d(
-                output_size,
-                # output_size,
-                output_size,
-                11,
-                stride=1,
-                padding=0,
-                bias=True,
-            )
-
             self.lookahead_cnn = nn.Conv1d(
                 output_size,
-                # output_size,
-                256,
+                output_size,
                 lookahead_kernel,
                 stride=1,
-                padding=0,
+                padding=lookahead_kernel//2,
                 bias=True,
             )
-
-
-            # self.lookahead_cnn =  nn.Conv1d(
-            #         output_size,
-            #         256,
-            #         lookahead_kernel // 2 +1,
-            #         stride=1,
-            #         padding=lookahead_kernel // 4,
-            #         bias=True
-            #     )
 
             activation_type = "swish"
             self.activation = get_activation(activation_type)
 
+            self.lookahead_norm = LayerNorm(output_size)
             self.dropout = torch.nn.Dropout(dropout_rate)
 
-            # self.lookahead_cnn2 = nn.Conv1d(
-            #         256,
-            #         256,
-            #         lookahead_kernel // 2 +1,
-            #         stride=1,
-            #         padding=lookahead_kernel // 4,
-            #         bias=True
-            #     )
-
-            self.lookahead_norm = LayerNorm(256)
             
 
-        output_size_embed = 256
-        self._output_size = output_size_embed
+        # output_size_embed = 256
+        # self._output_size = output_size_embed
         
         if not hasattr(self, "lookahead_cnn"):
             self.encoder_out_embed = torch.nn.Sequential(
-                    torch.nn.Linear(output_size, output_size_embed),
-                    LayerNorm(output_size_embed),
+                    torch.nn.Linear(output_size, output_size),
+                    get_activation('swish'),
+                    LayerNorm(output_size),                                                                                            
                     torch.nn.Dropout(dropout_rate),
                 )
+
+        # self.mamba_dropout = torch.nn.Dropout(dropout_rate)
+        # if self.normalize_before:
+        #     self.after_norm = LayerNorm(output_size)
 
         
         self.interctc_layer_idx = interctc_layer_idx
@@ -558,9 +397,7 @@ class MambaEncoder(nn.Module):
             xs_pad = xs_pad
         elif (
             isinstance(self.embed, Conv2dSubsampling)
-            or isinstance(self.embed, Conv2dSubsampling5)
-            or isinstance(self.embed, Conv2dSubsampling7)
-            or isinstance(self.embed, CausalConv1dSubsampling)
+            or isinstance(self.embed, Conv2dSubsamplingM)
             or isinstance(self.embed, CausalConv2dSubsampling)
         ):
             short_status, limit_size = check_short_utt(self.embed, xs_pad.size(1))
@@ -605,8 +442,17 @@ class MambaEncoder(nn.Module):
 
         intermediate_outs = []
         if len(self.interctc_layer_idx) == 0:
-            for layer in self.layers:
+            for layer_idx, layer in enumerate(self.layers):
                 xs_pad, residual = layer(xs_pad, residual, inference_params=inference_params)
+                if hasattr(self, "mamba_layer_dropout"):
+                    xs_pad = self.mamba_layer_dropout(xs_pad)
+                # if layer_idx+1 == 8 and hasattr(self, "lookahead_cnn"):
+                #     xs_pad = torch.nn.functional.pad(xs_pad, (0, 0, self.left_context, self.right_context))
+                #     xs_pad = self.lookahead_cnn0(xs_pad.transpose(1, 2)).transpose(1, 2)
+                #     # xs_pad = self.activation(xs_pad)     
+                #     # xs_pad = self.dropout(xs_pad)
+                #     xs_pad = self.lookahead_norm0(xs_pad)
+
         else:
             for layer_idx, layer in enumerate(self.layers):
                 xs_pad, residual = layer(xs_pad, residual, inference_params=inference_params)
@@ -672,22 +518,22 @@ class MambaEncoder(nn.Module):
 
 
         if hasattr(self, "lookahead_cnn"):
-            xs_pad = torch.nn.functional.pad(xs_pad, (0, 0, 10, 0))
-            xs_pad = self.lookahead_cnn0(xs_pad.transpose(1, 2)).transpose(1, 2)
-            xs_pad = self.activation(xs_pad)
-            xs_pad = torch.nn.functional.pad(xs_pad, (0, 0, self.left_context, self.right_context))
+            # use dinamic padding
+            # self.right_context = torch.randint(low=0, high=self.lookahead_kernel, size=(1,)).item()
+            # self.right_context = 10
+            # self.left_context = self.lookahead_kernel - 1 - self.right_context
+            # xs_pad = torch.nn.functional.pad(xs_pad, (0, 0, self.left_context, self.right_context))
             xs_pad = self.lookahead_cnn(xs_pad.transpose(1, 2)).transpose(1, 2)
-            xs_pad = self.activation(xs_pad)
-            
-            xs_pad = self.dropout(xs_pad)
-            
-            # xs_pad = self.lookahead_cnn2(xs_pad.transpose(1, 2)).transpose(1, 2)
-            # xs_pad = self.activation(xs_pad)
+            xs_pad = self.activation(xs_pad)     
             xs_pad = self.lookahead_norm(xs_pad)
+            xs_pad = self.dropout(xs_pad)
+        
+        if hasattr(self, "mamba_dropout"):
+            xs_pad = self.mamba_dropout(xs_pad)
 
         if hasattr(self, "encoder_out_embed"):
             xs_pad = self.encoder_out_embed(xs_pad)
-
+    
         # logging.info(f'xs_pad: {xs_pad.device}, {xs_pad.dtype}')
         # logging.info(f'xs_pad: {xs_pad.shape}')
         # xs_pad = xs_pad

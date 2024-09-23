@@ -58,7 +58,8 @@ import math
 from matplotlib import font_manager
 my_font = font_manager.FontProperties(fname="/usr/share/fonts/truetype/wqy/wqy-microhei.ttc")
 
-
+utt_id = None
+all_latency = []
 # 初始化颜色列表
 colors = []
 
@@ -388,8 +389,9 @@ class Speech2Text:
         self.enh_s2t_task = enh_s2t_task
         self.multi_asr = multi_asr
 
-        self.draw = True
-        self.k=0
+        self.draw = False
+        self.k = 0
+        self.calculate_latency = True
 
     @torch.no_grad()
     def __call__(
@@ -415,6 +417,12 @@ class Speech2Text:
         # Input as audio signal
         if isinstance(speech, np.ndarray):
             speech = torch.tensor(speech)
+        
+        if self.calculate_latency:
+            import textgrid
+            text_grid_path = f'/data/home/fangying/espnet/egs2/aishell/asr1/downloads/forced_alignment/test/{utt_id[6:11]}/{utt_id}.TextGrid'
+            logging.info(f"text_grid_path: {text_grid_path}")
+            utt_tg = textgrid.TextGrid.fromFile(text_grid_path)[0]
         
         if self.draw:
             from matplotlib import gridspec
@@ -451,6 +459,16 @@ class Speech2Text:
             ytick_labels = [0, 20, 40, 60, 80]
             plt.yticks(yticks, ytick_labels)
 
+            if self.calculate_latency:
+                for interval in utt_tg[:-1]:
+                    start_time = interval.minTime
+                    end_time = interval.maxTime
+                    text = interval.mark    
+                    # print(start_time, end_time, text)
+                    plt.vlines(start_time, 1, 80, color='g', linestyles='dashed')
+                    plt.vlines(end_time, 1, 80, color='g', linestyles='dashed')
+                    plt.text(start_time, 83, text, fontsize=16, color='g', ha='left', va='center',  fontproperties=my_font)
+
         # data: (Nsamples,) -> (1, Nsamples)
         speech = speech.unsqueeze(0).to(getattr(torch, self.dtype))
         # lengths: (1,)
@@ -468,16 +486,39 @@ class Speech2Text:
         ys_hat = (self.asr_model.ctc.argmax(enc).data)[0].tolist()
         no_repeat_ys_hat = list(set(ys_hat))
         logging.info(f'no_repeat_ys_hat: {no_repeat_ys_hat}')
-        token = self.converter.ids2tokens(no_repeat_ys_hat)
+        token = self.converter.ids2tokens(ys_hat)
+        token_no_repeat = self.converter.ids2tokens(no_repeat_ys_hat)
+
+        if self.calculate_latency:
+            utt_latency = {}
+            for interval in utt_tg:
+                start_time = interval.minTime
+                end_time = interval.maxTime
+                text = interval.mark
+                if text in token:
+                    index = token.index(text)
+                    # if index+1 < len(valleys):
+                    #     reg_time = (valleys[index+1]+1)*32
+                    # else:
+                    reg_time = (index+1)*32
+                    latency = reg_time - end_time*1000
+                    # for chunk_conformer
+                    # if (valleys[index]+1)%10!= 0  and (valleys[index]+1) != enc_before.size(1):
+                    #     latency = latency + (10-(valleys[index]+1)%10)*32
+
+                    if  start_time*1000 <= reg_time:
+                        all_latency.append(latency)
+                        utt_latency[text] = int(latency)
+                        logging.info(f'latency: {text} {int(latency)}ms')
 
         if self.draw:
             plt.subplot(spec[1])
-            for i in range(len(token)):
-                if token[i] == '<blank>':
+            for i in range(len(token_no_repeat)):
+                if token_no_repeat[i] == '<blank>':
                     # plt.plot(ys_hat_posterior[:, no_repeat_ys_hat[i]], color=colors[i], linestyle='dashed', linewidth=1)
                     continue
                 plt.plot(ys_hat_posterior[:,no_repeat_ys_hat[i]], color=colors[i], linewidth=1)
-                text = self.tokenizer.tokens2text(token[i])
+                text = self.tokenizer.tokens2text(token_no_repeat[i])
                 plt.text(torch.argmax(ys_hat_posterior[:, no_repeat_ys_hat[i]])-2, 1.05, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
             plt.ylim(0,1.2)
             plt.xlim(0,enc.shape[1]-1)
@@ -518,79 +559,134 @@ class Speech2Text:
 
             # c. Passed the encoder result and the beam search
             results = self._decode_single_sample(enc[0])
-            assert check_return_type(results)
+            # assert check_return_type(results)
 
         return results
-
+    
     def _decode_single_sample(self, enc: torch.Tensor):
-        if self.beam_search_transducer:
-            logging.info("encoder output length: " + str(enc.shape[0]))
-            nbest_hyps = self.beam_search_transducer(enc)
+        # if hasattr(self.beam_search.nn_dict, "decoder"):
+        #     if isinstance(self.beam_search.nn_dict.decoder, S4Decoder):
+        #         # Setup: required for S4 autoregressive generation
+        #         for module in self.beam_search.nn_dict.decoder.modules():
+        #             if hasattr(module, "setup_step"):
+        #                 module.setup_step()
 
-            best = nbest_hyps[0]
-            logging.info(f"total log probability: {best.score:.2f}")
-            logging.info(
-                f"normalized log probability: {best.score / len(best.yseq):.2f}"
-            )
-            logging.info(
-                "best hypo: " + "".join(self.converter.ids2tokens(best.yseq[1:])) + "\n"
-            )
-        elif self.hugging_face_model:
-            decoder_start_token_id = (
-                self.hugging_face_model.config.decoder_start_token_id
-            )
-            yseq = self.hugging_face_model.generate(
-                encoder_outputs=ModelOutput(
-                    last_hidden_state=self.hugging_face_linear_in(enc).unsqueeze(0)
-                ),
-                use_cache=True,
-                decoder_start_token_id=decoder_start_token_id,
-                num_beams=self.hugging_face_beam_size,
-                max_length=self.hugging_face_decoder_max_length,
-            )
-            nbest_hyps = [Hypothesis(yseq=yseq[0])]
-            logging.info(
-                "best hypo: "
-                + "".join(self.converter.ids2tokens(nbest_hyps[0].yseq[1:]))
-                + "\n"
-            )
-        else:
-            if hasattr(self.beam_search.nn_dict, "decoder"):
-                if isinstance(self.beam_search.nn_dict.decoder, S4Decoder):
-                    # Setup: required for S4 autoregressive generation
-                    for module in self.beam_search.nn_dict.decoder.modules():
-                        if hasattr(module, "setup_step"):
-                            module.setup_step()
-            nbest_hyps = self.beam_search(
-                x=enc, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
-            )
+        # nbest_hyps = self.beam_search(
+        #     x=enc, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
+        # )
 
-        nbest_hyps = nbest_hyps[: self.nbest]
+        # hyp = nbest_hyps[0]
+        # logging.info(f'hyp.yseq: {hyp.yseq}')
+
+        yseq = (self.asr_model.ctc.argmax(enc.unsqueeze(0)).data)[0].tolist()
+        y = [yseq[0]]  # 初始结果列表包含第一个元素
+        for item in yseq[1:]:
+            if item != y[-1]:  # 仅当当前元素与结果列表最后一个元素不同时，添加进结果列表
+                y.append(item)
+        
+        hyp = Hypothesis(
+                score=0.0,
+                scores=None,
+                states=None,
+                yseq=y,
+            )
 
         results = []
-        for hyp in nbest_hyps:
-            assert isinstance(hyp, (Hypothesis, TransHypothesis)), type(hyp)
+        
+        assert isinstance(hyp, (Hypothesis, TransHypothesis)), type(hyp)
 
-            # remove sos/eos and get results
-            last_pos = None if self.asr_model.use_transducer_decoder else -1
-            if isinstance(hyp.yseq, list):
-                token_int = hyp.yseq[1:last_pos]
-            else:
-                token_int = hyp.yseq[1:last_pos].tolist()
+        # remove sos/eos and get results
+        last_pos = None
+        # last_pos = None if self.asr_model.use_transducer_decoder else -1
+        if isinstance(hyp.yseq, list):
+            token_int = hyp.yseq[1:last_pos]
+        else:
+            token_int = hyp.yseq[1:last_pos].tolist()
 
-            # remove blank symbol id, which is assumed to be 0
-            token_int = list(filter(lambda x: x != 0, token_int))
+        # remove blank symbol id, which is assumed to be 0
+        token_int = list(filter(lambda x: x != 0, token_int))
 
-            # Change integer-ids to tokens
-            token = self.converter.ids2tokens(token_int)
+        # Change integer-ids to tokens
+        token = self.converter.ids2tokens(token_int)
 
-            if self.tokenizer is not None:
-                text = self.tokenizer.tokens2text(token)
-            else:
-                text = None
-            results.append((text, token, token_int, hyp))
+        if self.tokenizer is not None:
+            text = self.tokenizer.tokens2text(token)
+        else:
+            text = None
+        logging.info(f'best hypo: {text}' + "\n")
+        results.append((text, token, token_int, hyp))
 
         return results
+
+    # def _decode_single_sample(self, enc: torch.Tensor):
+    #     if self.beam_search_transducer:
+    #         logging.info("encoder output length: " + str(enc.shape[0]))
+    #         nbest_hyps = self.beam_search_transducer(enc)
+
+    #         best = nbest_hyps[0]
+    #         logging.info(f"total log probability: {best.score:.2f}")
+    #         logging.info(
+    #             f"normalized log probability: {best.score / len(best.yseq):.2f}"
+    #         )
+    #         logging.info(
+    #             "best hypo: " + "".join(self.converter.ids2tokens(best.yseq[1:])) + "\n"
+    #         )
+    #     elif self.hugging_face_model:
+    #         decoder_start_token_id = (
+    #             self.hugging_face_model.config.decoder_start_token_id
+    #         )
+    #         yseq = self.hugging_face_model.generate(
+    #             encoder_outputs=ModelOutput(
+    #                 last_hidden_state=self.hugging_face_linear_in(enc).unsqueeze(0)
+    #             ),
+    #             use_cache=True,
+    #             decoder_start_token_id=decoder_start_token_id,
+    #             num_beams=self.hugging_face_beam_size,
+    #             max_length=self.hugging_face_decoder_max_length,
+    #         )
+    #         nbest_hyps = [Hypothesis(yseq=yseq[0])]
+    #         logging.info(
+    #             "best hypo: "
+    #             + "".join(self.converter.ids2tokens(nbest_hyps[0].yseq[1:]))
+    #             + "\n"
+    #         )
+    #     else:
+    #         if hasattr(self.beam_search.nn_dict, "decoder"):
+    #             if isinstance(self.beam_search.nn_dict.decoder, S4Decoder):
+    #                 # Setup: required for S4 autoregressive generation
+    #                 for module in self.beam_search.nn_dict.decoder.modules():
+    #                     if hasattr(module, "setup_step"):
+    #                         module.setup_step()
+    #         nbest_hyps = self.beam_search(
+    #             x=enc, maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
+    #         )
+
+    #     nbest_hyps = nbest_hyps[: self.nbest]
+
+    #     results = []
+    #     for hyp in nbest_hyps:
+    #         assert isinstance(hyp, (Hypothesis, TransHypothesis)), type(hyp)
+
+    #         # remove sos/eos and get results
+    #         last_pos = None if self.asr_model.use_transducer_decoder else -1
+    #         if isinstance(hyp.yseq, list):
+    #             token_int = hyp.yseq[1:last_pos]
+    #         else:
+    #             token_int = hyp.yseq[1:last_pos].tolist()
+
+    #         # remove blank symbol id, which is assumed to be 0
+    #         token_int = list(filter(lambda x: x != 0, token_int))
+
+    #         # Change integer-ids to tokens
+    #         token = self.converter.ids2tokens(token_int)
+
+    #         if self.tokenizer is not None:
+    #             text = self.tokenizer.tokens2text(token)
+    #         else:
+    #             text = None
+    #         results.append((text, token, token_int, hyp))
+
+    #     return results
 
     @staticmethod
     def from_pretrained(
@@ -744,6 +840,8 @@ def inference(
             assert len(keys) == _bs, f"{len(keys)} != {_bs}"
             batch = {k: v[0] for k, v in batch.items() if not k.endswith("_lengths")}
 
+            global utt_id
+            utt_id = keys[0]
             # N-best list of (text, token, token_int, hyp_object)
             try:
                 results = speech2text(**batch)
@@ -1004,6 +1102,8 @@ def main(cmd=None):
     kwargs = vars(args)
     kwargs.pop("config", None)
     inference(**kwargs)
+    if len(all_latency) > 0:
+        logging.info(f'average_latency: {sum(all_latency)/len(all_latency)}')
 
 
 if __name__ == "__main__":

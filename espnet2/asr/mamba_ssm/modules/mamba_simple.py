@@ -12,11 +12,11 @@ from einops import rearrange, repeat
 
 from espnet2.asr.mamba_ssm.ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn
 
-# try:
-#     from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
-# except ImportError:
-#     causal_conv1d_fn, causal_conv1d_update = None, None
-causal_conv1d_fn, causal_conv1d_update = None, None
+try:
+    from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
+except ImportError:
+    causal_conv1d_fn, causal_conv1d_update = None, None
+# causal_conv1d_fn, causal_conv1d_update = None, None
 
 try:
     from espnet2.asr.mamba_ssm.ops.triton.selective_state_update import selective_state_update
@@ -33,7 +33,7 @@ class Mamba(nn.Module):
     def __init__(
         self,
         d_model,
-        d_state=16,
+        d_state=32,
         d_conv=4,
         expand=2,
         dt_rank="auto",

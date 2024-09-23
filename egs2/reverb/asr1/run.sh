@@ -2,7 +2,7 @@
 ###
  # @Author: FnoY fangying@westlake.edu.cn
  # @LastEditors: FnoY0723 fangying@westlake.edu.cn
- # @LastEditTime: 2024-06-26 21:18:43
+ # @LastEditTime: 2024-09-02 23:53:03
  # @FilePath: /espnet/egs2/reverb/asr1/run.sh
 ### 
 # Set bash to 'debug' mode, it will exit on :
@@ -16,7 +16,7 @@ set -o pipefail
 # WSJ0 + WSJ1 + WSJ cam0 (Clean speech only)
 train_set=tr_wsjcam0_si284
 valid_set=dt_mult_1ch
-test_sets="et_real_1ch"
+test_sets="et_real_1ch et_simu_1ch"
 
 ./asr.sh \
     --lang "en" \

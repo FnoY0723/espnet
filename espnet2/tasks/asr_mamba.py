@@ -24,7 +24,6 @@ from espnet2.asr.decoder.transformer_decoder import (
 )
 from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
 from espnet2.asr.encoder.mamba_encoder import MambaEncoder
-from espnet2.asr.encoder.mamba_minimal_encoder import MambaMinimalEncoder
 from espnet2.asr.mamba_espnet_model import MambaESPnetASRModel
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.default import DefaultFrontend
@@ -115,7 +114,6 @@ encoder_choices = ClassChoices(
     "encoder",
     classes=dict(
         mamba=MambaEncoder,
-        mamba_minimal=MambaMinimalEncoder,
     ),
     # type_check=AbsEncoder,
     default="mamba",

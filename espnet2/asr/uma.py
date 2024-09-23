@@ -1,7 +1,7 @@
 
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-06-24 19:23:27
+LastEditTime: 2024-09-05 13:27:45
 FilePath: /espnet/espnet2/asr/uma.py
 Notes: If the feature dimension changes from 256 to 512, just modify 'output_size: int = 256' to 'output_size: int = 512'.
 '''
@@ -24,6 +24,7 @@ class UMA(torch.nn.Module):
         input_size: int = 256,
         output_size: int = 256,
         lookahead_kernel: int = 0,
+        right_context: int = 0,
     ):
         assert check_argument_types()
         super().__init__()
@@ -32,6 +33,8 @@ class UMA(torch.nn.Module):
         self.chunk_wize = False
 
         if lookahead_kernel > 0:
+            self.right_context = right_context
+            self.left_context = lookahead_kernel - 1 - self.right_context
             # self.depthwise_conv = nn.Conv1d(
             #     output_size,
             #     output_size,
@@ -47,7 +50,7 @@ class UMA(torch.nn.Module):
                 output_size,
                 lookahead_kernel,
                 stride=1,
-                padding=lookahead_kernel // 2,
+                padding=0,
                 bias=True,
             )
 
@@ -62,6 +65,7 @@ class UMA(torch.nn.Module):
 
             activation_type = "swish"
             self.activation = get_activation(activation_type)
+            self.dropout = torch.nn.Dropout(0.1)
    
             # self.lookahead_cnn2 = nn.Conv1d(
             #         256,
@@ -72,7 +76,7 @@ class UMA(torch.nn.Module):
             #         bias=True
             #     )
 
-            self.lookahead_norm = torch.nn.LayerNorm(256)
+            self.lookahead_norm = LayerNorm(256)
 
         self.linear_sigmoid = torch.nn.Sequential(
             torch.nn.Linear(input_size, 1),
@@ -120,11 +124,10 @@ class UMA(torch.nn.Module):
         # uma_weights = self.gen_uma(xs_pad)
 
         if hasattr(self, "lookahead_cnn_uma"):
-            xs_pad2 = self.lookahead_cnn_uma(xs_pad.transpose(1, 2)).transpose(1, 2)
+            xs_pad2 = torch.nn.functional.pad(xs_pad, (0, 0, self.left_context, self.right_context))
+            xs_pad2 = self.lookahead_cnn_uma(xs_pad2.transpose(1, 2)).transpose(1, 2)
             xs_pad2 = self.activation(xs_pad2)
-            # xs_pad = self.activation(self.lookahead_norm(xs_pad))
-            # xs_pad = self.lookahead_cnn2(xs_pad.transpose(1, 2)).transpose(1, 2)
-            # xs_pad = self.activation(xs_pad)
+            xs_pad2 = self.dropout(xs_pad2)
             xs_pad2 = self.lookahead_norm(xs_pad2)
             uma_weights = self.linear_sigmoid(xs_pad2)
         else:
@@ -227,11 +230,10 @@ class UMA(torch.nn.Module):
         # uma_weights = self.gen_uma(xs_pad)
 
         if hasattr(self, "lookahead_cnn_uma"):
-            xs_pad2 = self.lookahead_cnn_uma(xs_pad.transpose(1, 2)).transpose(1, 2)
+            xs_pad2 = torch.nn.functional.pad(xs_pad, (0, 0, self.left_context, self.right_context))
+            xs_pad2 = self.lookahead_cnn_uma(xs_pad2.transpose(1, 2)).transpose(1, 2)
             xs_pad2 = self.activation(xs_pad2)
-            # xs_pad = self.activation(self.lookahead_norm(xs_pad))
-            # xs_pad = self.lookahead_cnn2(xs_pad.transpose(1, 2)).transpose(1, 2)
-            # xs_pad = self.activation(xs_pad)
+            xs_pad2 = self.dropout(xs_pad2)
             xs_pad2 = self.lookahead_norm(xs_pad2)
             uma_weights = self.linear_sigmoid(xs_pad2)
         else:
@@ -244,6 +246,10 @@ class UMA(torch.nn.Module):
         scalar_after = torch.nn.functional.pad(scalar_after,(0,0,0,1))  # (#batch, L, 1)
 
         mask = (uma_weights.lt(scalar_before)) & (uma_weights.lt(scalar_after)) # bool tensor (#batch, L, 1)
+        
+        # mask2 = (uma_weights.gt(scalar_before)) & (uma_weights.gt(scalar_after)) # bool tensor (#batch, L, 1)
+        # mask = mask | mask2
+
         mask = mask.reshape(uma_weights.shape[0], -1) # bool tensor (#batch, L)
 
         if self.chunk_wize:
@@ -254,6 +260,7 @@ class UMA(torch.nn.Module):
             mask[:, positions] = True
 
         mask[:,0] = True
+        mask[:,-1] = False
 
         if self.chunk_wize:
             # chunkwise
@@ -290,9 +297,19 @@ class UMA(torch.nn.Module):
 
         batch_index = mask.nonzero()[:,0] # (k,1); [0,0,0,...,1,1,...,2,2,...,#batch-1,...]
         valley_index_start = mask.nonzero()[:,1] # (k,1); [0,3,7,...,0,2,...,0,4,...,0,...]
+
         mask[:,0] = False
         mask[:,-1] = True
         valley_index_end = mask.nonzero()[:,1] + 2 
+        
+        # mask2 = (uma_weights.gt(scalar_before)) & (uma_weights.gt(scalar_after)) # bool tensor (#batch, L, 1)
+        # mask2[:,0] = False
+        # mask2[:,-1] = True
+        # valley_index_end2 = mask2.nonzero()[:,1] + 2 
+        # if valley_index_end.shape[0] > valley_index_end2.shape[0]:
+        #     valley_index_end[1:] = valley_index_end2
+        # else:
+        #     valley_index_end = valley_index_end2
 
         # (k,1); [5,9,...,4,...,6,...]
         valley_index_end = torch.where(valley_index_end > (length) * torch.ones_like(valley_index_end), 
@@ -331,5 +348,7 @@ class UMA(torch.nn.Module):
         #     logging.info(f'chunk_counts is None!')
         
         # return xs_pad, olens, chunk_counts
-        return xs_pad, olens, (chunk_counts, (uma_weights, valley_index_start))
+        return xs_pad, olens, (chunk_counts, (uma_weights, (valley_index_start, valley_index_end)))
 
+
+        # for 

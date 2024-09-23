@@ -365,7 +365,7 @@ class ESPnetASRModel(AbsESPnetModel):
         return {"feats": feats, "feats_lengths": feats_lengths}
 
     def encode(
-        self, speech: torch.Tensor, speech_lengths: torch.Tensor
+        self, name, speech: torch.Tensor, speech_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Frontend + Encoder. Note that this method is used by asr_inference.py
 
@@ -373,17 +373,25 @@ class ESPnetASRModel(AbsESPnetModel):
             speech: (Batch, Length, ...)
             speech_lengths: (Batch, )
         """
+
+        # logging.info(str(speech[0]))
+        # logging.info(str(max(speech[0]))+" "+str(min(speech[0])))
+
         with autocast(False):
             # 1. Extract feats
-            feats, feats_lengths = self._extract_feats(speech, speech_lengths)
+            feats, feats_lengths = self._extract_feats(name, speech, speech_lengths)
+            # logging.info("Logmel: "+ str(feats[0]))
+            # logging.info(str(feats[0].max())+" "+str(feats[0].min()))
 
             # 2. Data augmentation
             if self.specaug is not None and self.training:
                 feats, feats_lengths = self.specaug(feats, feats_lengths)
 
             # 3. Normalization for feature: e.g. Global-CMVN, Utterance-CMVN
-            if self.normalize is not None:
+            if self.normalize is not None: 
                 feats, feats_lengths = self.normalize(feats, feats_lengths)
+                # logging.info("After Norm: "+ str(feats[0]))
+                # logging.info(str(feats[0].max())+" "+str(feats[0].min()))
 
         # Pre-encoder, e.g. used for raw input data
         if self.preencoder is not None:
@@ -392,9 +400,7 @@ class ESPnetASRModel(AbsESPnetModel):
         # 4. Forward encoder
         # feats: (Batch, Length, Dim)
         # -> encoder_out: (Batch, Length2, Dim2)
-        if self.encoder.interctc_use_conditioning or getattr(
-            self.encoder, "ctc_trim", False
-        ):
+        if self.encoder.interctc_use_conditioning:
             encoder_out, encoder_out_lens, _ = self.encoder(
                 feats, feats_lengths, ctc=self.ctc
             )
@@ -430,7 +436,7 @@ class ESPnetASRModel(AbsESPnetModel):
         return encoder_out, encoder_out_lens
 
     def _extract_feats(
-        self, speech: torch.Tensor, speech_lengths: torch.Tensor
+        self, name, speech: torch.Tensor, speech_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         assert speech_lengths.dim() == 1, speech_lengths.shape
 
@@ -442,7 +448,7 @@ class ESPnetASRModel(AbsESPnetModel):
             #  e.g. STFT and Feature extract
             #       data_loader may send time-domain signal in this case
             # speech (Batch, NSamples) -> feats: (Batch, NFrames, Dim)
-            feats, feats_lengths = self.frontend(speech, speech_lengths)
+            feats, feats_lengths = self.frontend(name, speech, speech_lengths)
         else:
             # No frontend and no feature extract
             feats, feats_lengths = speech, speech_lengths

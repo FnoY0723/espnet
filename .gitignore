@@ -56,6 +56,8 @@ egs*/fisher_callhome_spanish/*/local/mapping*
 egs2/*/*/hkust_enh_data
 egs2/chime4
 egs2/reverb
+egs2/realman
+egs*/*/*/inference*
 
 # tools related
 tools/chainer

@@ -1,7 +1,7 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
 LastEditors: FnoY0723 fangying@westlake.edu.cn
-LastEditTime: 2024-07-03 15:28:30
+LastEditTime: 2024-08-30 16:39:23
 FilePath: /espnet/espnet2/layers/log_mel.py
 '''
 from typing import Tuple
@@ -69,7 +69,7 @@ class LogMel(torch.nn.Module):
         mel_feat = torch.matmul(feat, self.melmat)
         
         mel_feat = torch.clamp(mel_feat, min=1e-10) 
-        # mel_feat = torch.clamp(mel_feat, min=1e-5)
+        # mel_feat = torch.clamp(mel_feat, min=1e-4)
 
         if self.log_base is None:
             logmel_feat = mel_feat.log()
@@ -85,7 +85,7 @@ class LogMel(torch.nn.Module):
             logmel_feat = logmel_feat.masked_fill(
                 make_pad_mask(ilens, logmel_feat, 1), 0.0
             )
-        else:
+        else: 
             ilens = feat.new_full(
                 [feat.size(0)], fill_value=feat.size(1), dtype=torch.long
             )

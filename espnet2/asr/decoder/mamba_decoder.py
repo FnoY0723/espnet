@@ -34,6 +34,8 @@ from espnet2.asr.ctc import CTC
 import logging
 import math
 from functools import partial
+from espnet.nets.pytorch_backend.nets_utils import get_activation
+
 
 
 def create_block(
@@ -127,14 +129,10 @@ class MambaDecoder(AbsDecoder):
         self,
         vocab_size: int,
         encoder_output_size: int,
-        output_size: int = 256,
-        attention_heads: int = 4,
+        output_size: int = 512,
         num_blocks: int = 6,
         dropout_rate: float = 0.1,
-        positional_dropout_rate: float = 0.1,
-        attention_dropout_rate: float = 0.0,
         normalize_before: bool = True,
-        concat_after: bool = False,
         interctc_layer_idx: List[int] = [],
         interctc_use_conditioning: bool = False,
         ssm_cfg=None,
@@ -145,10 +143,20 @@ class MambaDecoder(AbsDecoder):
         residual_in_fp32=False,
         device=None,
         dtype=None,
+        positional_dropout_rate: float = 0.1,
     ):
         assert check_argument_types()
         super().__init__()
         self._output_size = output_size
+
+        self.embed = torch.nn.Sequential(
+            torch.nn.Linear(encoder_output_size, output_size),
+            LayerNorm(output_size),
+            torch.nn.Dropout(dropout_rate),
+            get_activation("swish"),
+            # PositionalEncoding(encoder_output_size, positional_dropout_rate),
+        )
+
         factory_kwargs = {"device": device, "dtype": dtype}
         self.residual_in_fp32 = residual_in_fp32
         self.normalize_before = normalize_before
@@ -186,11 +194,14 @@ class MambaDecoder(AbsDecoder):
                 for i in range(n_layer)
             ]
         )
+        # self.mamba_layer_dropout = torch.nn.Dropout(dropout_rate)
 
         self.norm_f = (nn.LayerNorm if not rms_norm else RMSNorm)(
             d_model, eps=norm_epsilon, **factory_kwargs
         )
-        
+        # 
+        # self.mamba_dropout = torch.nn.Dropout(dropout_rate)
+
         if self.normalize_before:
             self.after_norm = LayerNorm(output_size)
 
@@ -242,11 +253,15 @@ class MambaDecoder(AbsDecoder):
 
         masks = (~make_pad_mask(hlens)[:, None, :]).to(hs_pad.device)
 
+        hs_pad = self.embed(hs_pad)
+
         residual = None
         for layer in self.layers:
-            hs_pad, residual = layer(
-                hs_pad, residual, inference_params=inference_params
-            )
+            hs_pad, residual = layer(hs_pad, residual, inference_params=inference_params)
+
+            if hasattr(self, "mamba_layer_dropout"):
+                hs_pad = self.mamba_layer_dropout(hs_pad)
+
         if not self.fused_add_norm:
             residual = (hs_pad + residual) if residual is not None else hs_pad
             hs_pad = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
@@ -293,6 +308,8 @@ class MambaDecoder(AbsDecoder):
         if isinstance(hs_pad, tuple):
             hs_pad = hs_pad[0]
         
+        # hs_pad = self.mamba_dropout(hs_pad)
+
         if self.normalize_before:
             hs_pad = self.after_norm(hs_pad)
 

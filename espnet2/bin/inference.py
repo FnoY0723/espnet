@@ -1,10 +1,12 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
 LastEditors: FnoY0723 fangying@westlake.edu.cn
-LastEditTime: 2024-05-18 12:54:04
-FilePath: /espnet/espnet2/bin/inference2.py
+LastEditTime: 2024-09-02 13:29:50
+FilePath: /espnet/espnet2/bin/inference.py
 '''
 import os
+import numpy as np
+
 os.environ["OMP_NUM_THREADS"] = str(4) # 限制进程数量，放在import torch和numpy之前。不加会导致程序占用特别多的CPU资源，使得服务器变卡。 
 # limit the threads to reduce cpu overloads, will speed up when there are lots of CPU cores on the running machine 
 lang = 'zh'
@@ -24,13 +26,13 @@ from typing import List
 import multiprocessing as mp
 import numpy as np
 
-test_tar = '/data/home/RealisticAudio/dataset_flac/test/tar/high'
-json_file = os.path.join(test_tar, 'tanscript_test_tar.json')
+test_tar = '/data/home/RealisticAudio/RealMAN_modified/test_raw/ma_speech'
+json_file = os.path.join("/data/home/fangying/espnet/egs2/realman", 'test_raw_ma_speech.json')
 # aligned_results = '/data/home/RealisticAudio/codes/4_target_gen/aligned_moving_high_精确对齐_mcnn_v12epoch214'
 # aligned_name = aligned_results.split('/')[-1]
 # json_file = f'/data/home/RealisticAudio/codes/4_target_gen/asr_results/wenetspeech_asr_model/{aligned_name}.json'
 
-def procss(files):
+def process(files):
     
     def text_normalizer(text):
         text = text.upper()
@@ -43,7 +45,7 @@ def procss(files):
         speech2text = Speech2Text(
             asr_train_config='/data/home/fangying/espnet/egs2/wenetspeech/asr1/exp_ctc_44_32_60/espnet/pengcheng_guo_wenetspeech_asr_train_asr_raw_zh_char/config.yaml',
             asr_model_file='/data/home/fangying/espnet/egs2/wenetspeech/asr1/exp_ctc_44_32_60/espnet/pengcheng_guo_wenetspeech_asr_train_asr_raw_zh_char/valid.acc.ave_10best.pth',
-            device="cuda",
+            device="cpu",
             minlenratio=0.0,
             maxlenratio=0.0,
             ctc_weight=0.6,
@@ -83,7 +85,8 @@ def init_env_var(gpus: List[int]):
 
 
 if __name__ == '__main__':
-    gpus = [0,1,2,3,4,5]
+    # gpus = [0,1,2,3,4,5,6,7]
+    gpus = list(range(8))
     
     mp.set_start_method('spawn')
 
@@ -104,10 +107,13 @@ if __name__ == '__main__':
     pbar = tqdm.tqdm(total=len(files))
     
     p = mp.Pool(processes=len(gpus), initializer=init_env_var, initargs=(queue,))    
-    filess=[files[:len(files)//6], files[len(files)//6:len(files)//3], files[len(files)//3:len(files)//2], 
-             files[len(files)//2:len(files)//2+len(files)//6], files[len(files)//2+len(files)//6:len(files)//2+len(files)//3], 
-             files[len(files)//2+len(files)//3:]]
+
+    filess = np.array_split(files, len(gpus))
+
+    # filess=[files[:len(files)//8], files[len(files)//8:len(files)//4], files[len(files)//4:len(files)//4+len(files)//8], 
+    #          files[len(files)//4+len(files)//8:len(files)//2], files[len(files)//2:len(files)//2+len(files)//8], files[len(files)//2+len(files)//8:len(files)//2+len(files)//4], 
+    #          files[len(files)//2+len(files)//4: len(files)//2+len(files)//4+len(files)//8], files[len(files)//2+len(files)//4+len(files)//8:]]
     
-    p.map(procss, filess)
+    p.map(process, filess)
     p.close()
     p.join()

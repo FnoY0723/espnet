@@ -10,7 +10,7 @@ from typeguard import check_argument_types
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
 from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
-from espnet.nets.pytorch_backend.transformer.attention import StreamingMultiHeadedAttention, ChunkMultiHeadedAttention
+from espnet.nets.pytorch_backend.transformer.attention import StreamingMultiHeadedAttention, ChunkMultiHeadedAttention, LookaheadMultiHeadedAttention
 from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
 from espnet.nets.pytorch_backend.transformer.encoder_layer import EncoderLayer, ChunkEncoderLayer
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
@@ -34,6 +34,54 @@ from espnet.nets.pytorch_backend.transformer.subsampling import (
 
 from espnet2.asr.ctc import CTC
 from espnet.nets.pytorch_backend.nets_utils import get_activation
+
+def make_chunk_mask(
+        size: int,
+        chunk_size: int,
+        use_dynamic_chunk: bool,
+        device: torch.device = torch.device("cpu"),
+) -> torch.Tensor:
+    """Create mask for subsequent steps (size, size) with chunk size,
+       this is for streaming encoder
+
+    Args:
+        size (int): size of mask
+        chunk_size (int): size of chunk
+        use_dynamic_chunk (bool): whether to use dynamic chunk or not
+        device (torch.device): "cpu" or "cuda" or torch.Tensor.device
+
+    Returns:
+        torch.Tensor: mask
+
+    Examples:
+        >>> subsequent_chunk_mask(4, 2)
+        [[1, 1, 0, 0],
+         [1, 1, 0, 0],
+         [1, 1, 1, 1],
+         [1, 1, 1, 1]]
+    """
+    # use_dynamic_chunk = False
+    # chunk_size = 5
+    if use_dynamic_chunk:
+        max_len = size
+        chunk_size = torch.randint(1, max_len, (1, )).item()
+        if chunk_size > max_len // 2:
+                chunk_size = max_len
+        else:
+            chunk_size = chunk_size % 5 + 1
+
+    # logging.info(f'chunk_size: {chunk_size}')
+    # logging.info(f'use_dynamic_chunk: {use_dynamic_chunk}, chunk_size: {chunk_size}')
+    org = torch.arange(size).repeat(size, 1).to(device)
+    # ret = torch.zeros(size, size, device=device, dtype=torch.bool)
+    chunk_idx = torch.arange(0, size, chunk_size, device=device)
+    chunk_idx = torch.cat((chunk_idx, torch.tensor([size], device=device)), dim=0)
+    chunk_length = chunk_idx[1:] - chunk_idx[:-1]
+    repeats = torch.repeat_interleave(chunk_idx[1:], chunk_length)
+    ret = org < repeats.reshape(-1, 1)
+    # ret = torch.tril(torch.ones(size, size), diagonal=0).bool().to(device)
+
+    return ret
 
 class UnimodalAttentionDecoder(AbsDecoder):
     """Transformer encoder module.
@@ -79,6 +127,10 @@ class UnimodalAttentionDecoder(AbsDecoder):
         padding_idx: int = -1,
         interctc_layer_idx: List[int] = [],
         interctc_use_conditioning: bool = False,
+        lookahead_kernel: int = 0,
+        right_context: int = 0,
+        chunk_size: int = 0,
+        use_dynamic_chunk: bool = False,
     ):
         assert check_argument_types()
         super().__init__()
@@ -118,28 +170,91 @@ class UnimodalAttentionDecoder(AbsDecoder):
             )
         else:
             raise NotImplementedError("Support only linear or conv1d.")
+        
+        self.chunk_size = chunk_size
+        self.use_dynamic_chunk = use_dynamic_chunk
 
-        self.encoders = repeat(
-            num_blocks,
-            lambda lnum: EncoderLayer(
-                output_size,
-                StreamingMultiHeadedAttention(
-                    attention_heads, output_size, attention_dropout_rate
+        if self.chunk_size > 0:
+            self.encoders = repeat(
+                num_blocks,
+                lambda lnum: EncoderLayer(
+                    output_size,
+                    MultiHeadedAttention(
+                        attention_heads, output_size, attention_dropout_rate
+                    ),
+                    positionwise_layer(*positionwise_layer_args),
+                    dropout_rate,
+                    normalize_before,
+                    concat_after,
                 ),
-                positionwise_layer(*positionwise_layer_args),
-                dropout_rate,
-                normalize_before,
-                concat_after,
-            ),
-        )
+            )
+        else:
+            self.encoders = repeat(
+                num_blocks,
+                lambda lnum: EncoderLayer(
+                    output_size,
+                    StreamingMultiHeadedAttention(
+                        attention_heads, output_size, attention_dropout_rate
+                    ),
+                    positionwise_layer(*positionwise_layer_args),
+                    dropout_rate,
+                    normalize_before,
+                    concat_after,
+                ),
+            )
+
+        # self.la_decoder = EncoderLayer(
+        #         output_size,
+        #         LookaheadMultiHeadedAttention(
+        #             attention_heads, output_size, attention_dropout_rate
+        #         ),
+        #         positionwise_layer(*positionwise_layer_args),
+        #         dropout_rate,
+        #         normalize_before,
+        #         concat_after,
+        #     )
+        
+
+        self.lookahead_kernel = lookahead_kernel
+        self.right_context = right_context
+        self.left_context = lookahead_kernel - 1 - self.right_context
+        if lookahead_kernel > 0:
+            # self.lookahead_cnn = torch.nn.Conv1d(
+            #     output_size,
+            #     output_size,
+            #     lookahead_kernel,
+            #     stride=1,
+            #     padding=0,
+            #     bias=True,
+            # )
+
+            self.lookahead_cnn = torch.nn.Conv1d(
+                output_size,
+                output_size,
+                lookahead_kernel,
+                stride=1,
+                padding= lookahead_kernel // 2,
+                bias=True,
+            )
+
+            activation_type = "swish"
+            self.activation = get_activation(activation_type)
+
+            self.lookahead_norm = LayerNorm(output_size)
+            self.dropout = torch.nn.Dropout(dropout_rate)
+
+
         if self.normalize_before:
             self.after_norm = LayerNorm(output_size)
 
         self.interctc_layer_idx = interctc_layer_idx
         if len(interctc_layer_idx) > 0:
-            assert 0 < min(interctc_layer_idx) and max(interctc_layer_idx) < num_blocks
+            assert 0 < min(interctc_layer_idx) and max(interctc_layer_idx) <= num_blocks
         self.interctc_use_conditioning = interctc_use_conditioning
         self.conditioning_layer = None
+        if self.interctc_use_conditioning:
+            self.conditioning_act = get_activation("swish")
+            self.conditioning_cnn = torch.nn.Conv1d(output_size, output_size, 3, stride=1, padding=1, bias=True,)
 
 
     def output_size(self) -> int:
@@ -167,10 +282,31 @@ class UnimodalAttentionDecoder(AbsDecoder):
 
         hs_pad = self.embed(hs_pad)
 
+        if self.chunk_size > 0:
+            chunk_masks = make_chunk_mask(hs_pad.size(1), self.chunk_size, self.use_dynamic_chunk,device=hs_pad.device) # (L, L)
+            chunk_masks = chunk_masks.unsqueeze(0)  # (1, L, L)
+            # logging.info(f'{chunk_masks[0]}')
+            chunk_masks = masks & chunk_masks  # (B, L, L)
+
+        # for i, encoder_layer in enumerate(self.la_encoder):
+        #     hs_pad, masks = encoder_layer(hs_pad, masks)
 
         intermediate_outs = []
         if len(self.interctc_layer_idx) == 0:
-            hs_pad, masks = self.encoders(hs_pad, masks)
+            if self.chunk_size > 0:
+                # hs_pad, masks = self.encoders(hs_pad, masks)
+                hs_pad, chunk_masks = self.encoders(hs_pad, chunk_masks)
+            else:
+                for layer_idx, encoder_layer in enumerate(self.encoders):
+                    hs_pad, masks = encoder_layer(hs_pad, masks)
+                    if layer_idx + 1 == 4:
+                        if hasattr(self, "lookahead_cnn"):
+                            # hs_pad = torch.nn.functional.pad(hs_pad, (0, 0, self.left_context, self.right_context))
+                            hs_pad = self.lookahead_cnn(hs_pad.transpose(1, 2)).transpose(1, 2)
+                            hs_pad = self.activation(hs_pad)     
+                            hs_pad = self.lookahead_norm(hs_pad)
+                            hs_pad = self.dropout(hs_pad)
+
         else:
             for layer_idx, encoder_layer in enumerate(self.encoders):
                 hs_pad, masks = encoder_layer(hs_pad, masks)
@@ -191,14 +327,37 @@ class UnimodalAttentionDecoder(AbsDecoder):
 
                         if isinstance(hs_pad, tuple):
                             x, pos_emb = hs_pad
-                            x = x + self.conditioning_layer(ctc_out)
+                            condition = self.conditioning_layer(ctc_out)
+                            condition = self.conditioning_act(condition)
+                            condition = self.conditioning_cnn(condition.transpose(1, 2)).transpose(1, 2)
+                            x = x + condition
                             hs_pad = (x, pos_emb)
                         else:
-                            hs_pad = hs_pad + self.conditioning_layer(ctc_out) 
+                            condition = self.conditioning_layer(ctc_out)
+                            condition = self.conditioning_act(condition)
+                            condition = self.conditioning_cnn(condition.transpose(1, 2)).transpose(1, 2)
+                            hs_pad = hs_pad + condition 
 
+                        # if isinstance(hs_pad, tuple):
+                        #     x, pos_emb = hs_pad
+                        #     x = x + self.conditioning_layer(ctc_out)
+                        #     hs_pad = (x, pos_emb)
+                        # else:
+                        #     hs_pad = hs_pad + self.conditioning_layer(ctc_out) 
+        
+        # if hasattr(self, "la_decoder"):
+        #     hs_pad = self.la_decoder(hs_pad, masks)
         if isinstance(hs_pad, tuple):
             hs_pad = hs_pad[0]
         
+        # if hasattr(self, "lookahead_cnn"):
+        #     # hs_pad = torch.nn.functional.pad(hs_pad, (0, 0, self.left_context, self.right_context))
+        #     xs_pad = self.lookahead_cnn(xs_pad.transpose(1, 2)).transpose(1, 2)
+        #     xs_pad = self.activation(xs_pad)     
+        #     xs_pad = self.lookahead_norm(xs_pad)
+        #     xs_pad = self.dropout(xs_pad)
+
+
         if self.normalize_before:
             hs_pad = self.after_norm(hs_pad)
 

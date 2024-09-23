@@ -315,8 +315,29 @@ class CommonPreprocessor(AbsPreprocessor):
             
             if self.speech_volume_normalize is not None:
                 speech = data[self.speech_name]
+                # import logging
+                # logging.info(self.speech_name)
+                # import numpy as np
+                # np.save(f"/data/home/fangying/espnet/espnet2/asr/frontend/speech_{speech.shape[0]}.npy", speech)
+                
                 ma = np.max(np.abs(speech))
                 data[self.speech_name] = speech * self.speech_volume_normalize / ma
+
+                # def customize_soxnorm(wav, gain=-3, factor=None):
+                #     wav = np.clip(wav, a_max=1, a_min=-1)
+                #     if factor is None:
+                #         linear_gain = 10 ** (gain / 20)
+                #         factor = linear_gain / np.abs(wav).max()
+                #         wav = wav * factor
+                #         import logging
+                #         logging.info(f"linear_gain: {linear_gain}, factor: {factor}")
+                #         return wav, factor
+                #     else:
+                #         wav = wav * factor
+                #         return wav, None
+                # speech, factor = customize_soxnorm(speech)
+                # data[self.speech_name] = speech
+
         assert check_return_type(data)
         return data
 

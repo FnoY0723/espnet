@@ -162,8 +162,8 @@ def make_chunk_mask(
          [1, 1, 1, 1],
          [1, 1, 1, 1]]
     """
-    # use_dynamic_chunk = False
-    # chunk_size = 20
+    use_dynamic_chunk = False
+    chunk_size = 20
     if use_dynamic_chunk:
         max_len = size
         chunk_size = torch.randint(1, max_len, (1, )).item()
@@ -172,6 +172,7 @@ def make_chunk_mask(
         else:
             chunk_size = chunk_size % 32 + 1
 
+    # logging.info(f'chunk_size: {chunk_size}')
     # logging.info(f'use_dynamic_chunk: {use_dynamic_chunk}, chunk_size: {chunk_size}')
     org = torch.arange(size).repeat(size, 1).to(device)
     # ret = torch.zeros(size, size, device=device, dtype=torch.bool)

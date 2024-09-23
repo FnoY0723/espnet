@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+###
+ # @Author: FnoY fangying@westlake.edu.cn
+ # @LastEditors: FnoY0723 fangying@westlake.edu.cn
+ # @LastEditTime: 2024-08-09 16:11:21
+ # @FilePath: /espnet/egs2/aishell2/asr1/run.sh
+### 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 CUDA_VISIBLE_DEVICES=5

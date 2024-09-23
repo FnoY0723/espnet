@@ -652,7 +652,7 @@ class AbsTask(ABC):
         group.add_argument(
             "--freeze_param",
             type=str,
-            default=[],
+            default=[], #'encoder','uma'
             nargs="*",
             help="Freeze parameters",
         )

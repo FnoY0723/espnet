@@ -32,8 +32,11 @@ class Speech2Text:
     ):
 
         self.model = whisper.load_model(
-            name=model_tag, download_root=model_dir, device=device
+            name=model_tag, device=device
         )
+        # self.model = whisper.load_model(
+        #     name=model_tag, download_root=model_dir, device=device
+        # )
 
     @torch.no_grad()
     @typechecked

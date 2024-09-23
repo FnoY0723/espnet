@@ -33,7 +33,7 @@ from espnet2.asr.encoder.contextual_block_conformer_encoder import (
 from espnet2.asr.encoder.contextual_block_transformer_encoder import (
     ContextualBlockTransformerEncoder,
 )
-from espnet2.asr.encoder.e_branchformer_condition_encoder import EBranchformerEncoder
+from espnet2.asr.encoder.e_branchformer_encoder import EBranchformerEncoder
 from espnet2.asr.encoder.hubert_encoder import (
     FairseqHubertEncoder,
     FairseqHubertPretrainEncoder,
