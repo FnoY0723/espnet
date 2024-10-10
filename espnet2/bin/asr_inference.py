@@ -3,19 +3,14 @@ import argparse
 import logging
 import sys
 from distutils.version import LooseVersion
-from itertools import groupby
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
 import torch.quantization
 from typeguard import check_argument_types, check_return_type
 
-# from espnet2.asr.decoder.hugging_face_transformers_decoder import (
-#     get_hugging_face_model_lm_head,
-#     get_hugging_face_model_network,
-# )
 from espnet2.asr.decoder.s4_decoder import S4Decoder
 from espnet2.asr.transducer.beam_search_transducer import BeamSearchTransducer
 from espnet2.asr.transducer.beam_search_transducer import (
@@ -27,42 +22,55 @@ from espnet2.tasks.asr import ASRTask
 from espnet2.tasks.enh_s2t import EnhS2TTask
 from espnet2.tasks.lm import LMTask
 from espnet2.text.build_tokenizer import build_tokenizer
-# from espnet2.text.hugging_face_token_id_converter import HuggingFaceTokenIDConverter
 from espnet2.text.token_id_converter import TokenIDConverter
 from espnet2.text.whisper_token_id_converter import OpenAIWhisperTokenIDConverter
 from espnet2.torch_utils.device_funcs import to_device
 from espnet2.torch_utils.set_all_random_seed import set_all_random_seed
 from espnet2.utils import config_argparse
-from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import str2bool, str2triple_str, str_or_none
 from espnet.nets.batch_beam_search import BatchBeamSearch
 from espnet.nets.batch_beam_search_online_sim import BatchBeamSearchOnlineSim
 from espnet.nets.beam_search import BeamSearch, Hypothesis
 from espnet.nets.beam_search_timesync import BeamSearchTimeSync
-from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
 from espnet.nets.pytorch_backend.transformer.subsampling import TooShortUttError
 from espnet.nets.scorer_interface import BatchScorerInterface
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.nets.scorers.length_bonus import LengthBonus
 from espnet.utils.cli_utils import get_commandline_args
+from espnet2.torch_utils.model_summary import model_summary
 
 try:
-    from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM
+    from transformers import AutoModelForSeq2SeqLM
     from transformers.file_utils import ModelOutput
 
     is_transformers_available = True
 except ImportError:
     is_transformers_available = False
 
-# Alias for typing
-ListOfHypothesis = List[
-    Tuple[
-        Optional[str],
-        List[str],
-        List[int],
-        Union[Hypothesis, ExtTransHypothesis, TransHypothesis],
-    ]
-]
+import os
+from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
+import librosa
+import librosa.display
+from espnet2.main_funcs.calculate_all_attentions import calculate_all_attentions
+import math
+from matplotlib import font_manager
+my_font = font_manager.FontProperties(fname="/usr/share/fonts/truetype/wqy/wqy-microhei.ttc")
+
+
+# 初始化颜色列表
+colors = []
+
+# 在色环中选择30种不同的色相
+for i in range(20):
+    # 使用HSV颜色空间的色相
+    hue = i / 20
+    
+    # 将HSV颜色转换为RGB颜色
+    color = plt.cm.hsv(hue)
+    
+    # 添加颜色到列表中
+    colors.append(color)
 
 
 class Speech2Text:
@@ -106,7 +114,7 @@ class Speech2Text:
         quantize_modules: List[str] = ["Linear"],
         quantize_dtype: str = "qint8",
         hugging_face_decoder: bool = False,
-        hugging_face_decoder_conf: Dict[str, Any] = {},
+        hugging_face_decoder_max_length: int = 256,
         time_sync: bool = False,
         multi_asr: bool = False,
     ):
@@ -155,6 +163,9 @@ class Speech2Text:
 
         decoder = asr_model.decoder
 
+        logging.info(model_summary(asr_model.encoder))
+        # logging.info(model_summary(asr_model.decoder))
+        
         ctc = CTCPrefixScorer(ctc=asr_model.ctc, eos=asr_model.eos)
         token_list = asr_model.token_list
         scorers.update(
@@ -233,54 +244,26 @@ class Speech2Text:
                     " && ./installers/install_transformers.sh`."
                 )
 
-            # if decoder.causal_lm:
-            #     hugging_face_model = AutoModelForCausalLM.from_pretrained(
-            #         decoder.model_name_or_path
-            #     )
+            hugging_face_model = AutoModelForSeq2SeqLM.from_pretrained(
+                decoder.model_name_or_path
+            )
 
-            #     hugging_face_model.resize_token_embeddings(decoder.lm_head.out_features)
+            hugging_face_model.lm_head.load_state_dict(decoder.lm_head.state_dict())
 
-            #     transformer = get_hugging_face_model_network(hugging_face_model)
-            #     transformer.load_state_dict(decoder.decoder.state_dict())
-
-            #     lm_head = get_hugging_face_model_lm_head(hugging_face_model)
-            #     lm_head.load_state_dict(decoder.lm_head.state_dict())
-            # else:
-            #     hugging_face_model = AutoModelForSeq2SeqLM.from_pretrained(
-            #         decoder.model_name_or_path
-            #     )
-
-            #     hugging_face_model.lm_head.load_state_dict(decoder.lm_head.state_dict())
-
-            #     if hasattr(hugging_face_model, "model"):
-            #         hugging_face_model.model.decoder.load_state_dict(
-            #             decoder.decoder.state_dict()
-            #         )
-            #         del hugging_face_model.model.encoder
-            #     else:
-            #         hugging_face_model.decoder.load_state_dict(
-            #             decoder.decoder.state_dict()
-            #         )
-            #         del hugging_face_model.encoder
+            if hasattr(hugging_face_model, "model"):
+                hugging_face_model.model.decoder.load_state_dict(
+                    decoder.decoder.state_dict()
+                )
+                del hugging_face_model.model.encoder
+            else:
+                hugging_face_model.decoder.load_state_dict(decoder.decoder.state_dict())
+                del hugging_face_model.encoder
 
             del asr_model.decoder.lm_head
             del asr_model.decoder.decoder
 
             hugging_face_linear_in = decoder.linear_in
             hugging_face_model.to(device=device).eval()
-
-            if "num_beams" not in hugging_face_decoder_conf:
-                hugging_face_decoder_conf[
-                    "num_beams"
-                ] = hugging_face_model.config.num_beams
-
-            if (
-                hugging_face_model.config.pad_token_id is None
-                and "pad_token_id" not in hugging_face_decoder_conf
-            ):
-                hugging_face_decoder_conf[
-                    "pad_token_id"
-                ] = hugging_face_model.config.eos_token_id
 
             beam_search = None
             beam_search_transducer = None
@@ -378,10 +361,6 @@ class Speech2Text:
         else:
             tokenizer = build_tokenizer(token_type=token_type)
 
-        # if token_type == "hugging_face":
-        #     converter = HuggingFaceTokenIDConverter(model_name_or_path=bpemodel)
-        # el
-        
         if bpemodel not in ["whisper_en", "whisper_multilingual"]:
             converter = TokenIDConverter(token_list=token_list)
         else:
@@ -399,7 +378,8 @@ class Speech2Text:
         self.beam_search_transducer = beam_search_transducer
         self.hugging_face_model = hugging_face_model
         self.hugging_face_linear_in = hugging_face_linear_in
-        self.hugging_face_decoder_conf = hugging_face_decoder_conf
+        self.hugging_face_beam_size = beam_size
+        self.hugging_face_decoder_max_length = hugging_face_decoder_max_length
         self.maxlenratio = maxlenratio
         self.minlenratio = minlenratio
         self.device = device
@@ -408,15 +388,19 @@ class Speech2Text:
         self.enh_s2t_task = enh_s2t_task
         self.multi_asr = multi_asr
 
+        self.draw = False
+        self.k=0
+
     @torch.no_grad()
     def __call__(
-        self, name, speech: Union[torch.Tensor, np.ndarray]
-    ) -> Union[
-        ListOfHypothesis,
+        self, speech: Union[torch.Tensor, np.ndarray]
+    ) -> List[
         Tuple[
-            ListOfHypothesis,
-            Optional[Dict[int, List[str]]],
-        ],
+            Optional[str],
+            List[str],
+            List[int],
+            Union[Hypothesis, ExtTransHypothesis, TransHypothesis],
+        ]
     ]:
         """Inference
 
@@ -432,6 +416,41 @@ class Speech2Text:
         if isinstance(speech, np.ndarray):
             speech = torch.tensor(speech)
 
+        if self.draw:
+            from matplotlib import gridspec
+            y = speech.cpu().numpy()
+            sr = 16000
+            # 计算短时傅里叶变换（STFT）
+            hop_length = 128
+            n_fft = 512
+            stft = librosa.stft(y, n_fft=n_fft, hop_length=hop_length)
+
+            # 计算功率谱
+            power = np.abs(stft)**2
+            # 绘制spectrogram
+            freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+            times = librosa.frames_to_time(np.arange(power.shape[1]), sr=sr, hop_length=hop_length)
+
+            # 指定要截取的频率范围
+            fmax = 4000  # Hz
+
+            # 获取要截取的频率范围的索引
+            idx_max = np.argmin(np.abs(freqs - fmax))
+
+            # 截取指定频率范围的功率谱
+            power_crop =power[:idx_max, :]
+
+            plt.figure(figsize=(10, 8))
+            spec = gridspec.GridSpec(ncols=1, nrows=2,
+                            height_ratios=[1, 1])
+            plt.subplot(spec[0])
+            librosa.display.specshow(librosa.power_to_db(power_crop, ref=np.max), y_axis='mel', x_axis='time', fmin = 0, fmax = 80,sr=sr, hop_length=hop_length)
+            plt.xlabel('Time (s)')
+            plt.ylabel('Frequency')
+            yticks = [0, 20, 40, 60, 80]
+            ytick_labels = [0, 20, 40, 60, 80]
+            plt.yticks(yticks, ytick_labels)
+
         # data: (Nsamples,) -> (1, Nsamples)
         speech = speech.unsqueeze(0).to(getattr(torch, self.dtype))
         # lengths: (1,)
@@ -443,7 +462,36 @@ class Speech2Text:
         batch = to_device(batch, device=self.device)
 
         # b. Forward Encoder
-        enc, enc_olens = self.asr_model.encode(name, **batch)
+        enc, enclen = self.asr_model.encode(**batch)
+
+        ys_hat_posterior = (self.asr_model.ctc.softmax(enc).data)[0].cpu()
+        logging.info(f'ys_hat_posterior: {ys_hat_posterior.shape}')
+        ys_hat = (self.asr_model.ctc.argmax(enc).data)[0].tolist()
+        no_repeat_ys_hat = list(set(ys_hat))
+        logging.info(f'no_repeat_ys_hat: {no_repeat_ys_hat}')
+        token = self.converter.ids2tokens(no_repeat_ys_hat)
+
+        if self.draw:
+            plt.subplot(spec[1])
+            # alpha0 = scalar_importance[0].squeeze()
+            # plt.plot(alpha0, color='cyan',linewidth=2)
+            for i in range(len(token)):
+                if token[i] == '<blank>':
+                    # plt.plot(ys_hat_posterior[:, no_repeat_ys_hat[i]], color=colors[i], linestyle='dashed', linewidth=1)
+                    continue
+                plt.plot(ys_hat_posterior[:,no_repeat_ys_hat[i]], color=colors[i], linewidth=1)
+                text = self.tokenizer.tokens2text(token[i])
+                plt.text(torch.argmax(ys_hat_posterior[:, no_repeat_ys_hat[i]])-2, 1.05, 'b' if text == '<blank>' else text, color='black', fontproperties=my_font, fontsize=15)
+            # plt.vlines(scalar_importance[1], 0, 1, linestyles='dashed', colors='red')
+            plt.ylim(0,1.2)
+            plt.xlim(0,enc.shape[1]-1)
+           
+            image_dir = "./inference_delay_comparison_0509/causal_attention_auxiliary_training_images"
+            if not os.path.exists(image_dir):
+                os.makedirs(image_dir)
+            plt.savefig(os.path.join(image_dir,f'hyp_{self.k}.png'))
+            self.k = self.k+1
+
         if self.multi_asr:
             enc = enc.unbind(dim=1)  # (batch, num_inf, ...) -> num_inf x [batch, ...]
         if self.enh_s2t_task or self.multi_asr:
@@ -468,40 +516,15 @@ class Speech2Text:
 
         else:
             # Normal ASR
-            intermediate_outs = None
             if isinstance(enc, tuple):
-                intermediate_outs = enc[1]
                 enc = enc[0]
             assert len(enc) == 1, len(enc)
 
             # c. Passed the encoder result and the beam search
             results = self._decode_single_sample(enc[0])
-
-            # Encoder intermediate CTC predictions
-            if intermediate_outs is not None:
-                encoder_interctc_res = self._decode_interctc(intermediate_outs)
-                results = (results, encoder_interctc_res)
             assert check_return_type(results)
 
         return results
-
-    def _decode_interctc(
-        self, intermediate_outs: List[Tuple[int, torch.Tensor]]
-    ) -> Dict[int, List[str]]:
-        assert check_argument_types()
-
-        exclude_ids = [self.asr_model.blank_id, self.asr_model.sos, self.asr_model.eos]
-        res = {}
-        token_list = self.beam_search.token_list
-
-        for layer_idx, encoder_out in intermediate_outs:
-            y = self.asr_model.ctc.argmax(encoder_out)[0]  # batch_size = 1
-            y = [x[0] for x in groupby(y) if x[0] not in exclude_ids]
-            y = [token_list[x] for x in y]
-
-            res[layer_idx] = y
-
-        return res
 
     def _decode_single_sample(self, enc: torch.Tensor):
         if self.beam_search_transducer:
@@ -517,48 +540,22 @@ class Speech2Text:
                 "best hypo: " + "".join(self.converter.ids2tokens(best.yseq[1:])) + "\n"
             )
         elif self.hugging_face_model:
-            num_beams = self.hugging_face_decoder_conf["num_beams"]
-            enc = self.hugging_face_linear_in(enc).unsqueeze(0)
-            if self.asr_model.decoder.causal_lm:
-                forward_args, _ = self.asr_model.decoder.add_prefix_postfix(
-                    enc,
-                    torch.tensor([enc.shape[1]]).to(enc.device),
-                    torch.ones([1, 1], dtype=int, device=enc.device),
-                    torch.ones([1], dtype=int, device=enc.device),
-                )
-
-                # input_ids are ignored if we provide inputs_embeds,
-                # but input_ids are still required, so we make fake ones
-                input_ids = torch.ones(
-                    [1, forward_args["inputs_embeds"].shape[1]],
-                    dtype=int,
-                    device=enc.device,
-                )
-
-                yseq = self.hugging_face_model.generate(
-                    input_ids.repeat(num_beams, 1),
-                    inputs_embeds=forward_args["inputs_embeds"].repeat(num_beams, 1, 1),
-                    attention_mask=input_ids.repeat(num_beams, 1),
-                    **self.hugging_face_decoder_conf,
-                )
-
-                yseq = yseq[:, input_ids.shape[1] - 1 :]
-            else:
-                decoder_start_token_id = (
-                    self.hugging_face_model.config.decoder_start_token_id
-                )
-                yseq = self.hugging_face_model.generate(
-                    encoder_outputs=ModelOutput(last_hidden_state=enc),
-                    decoder_start_token_id=decoder_start_token_id,
-                    **self.hugging_face_decoder_conf,
-                )
-
+            decoder_start_token_id = (
+                self.hugging_face_model.config.decoder_start_token_id
+            )
+            yseq = self.hugging_face_model.generate(
+                encoder_outputs=ModelOutput(
+                    last_hidden_state=self.hugging_face_linear_in(enc).unsqueeze(0)
+                ),
+                use_cache=True,
+                decoder_start_token_id=decoder_start_token_id,
+                num_beams=self.hugging_face_beam_size,
+                max_length=self.hugging_face_decoder_max_length,
+            )
             nbest_hyps = [Hypothesis(yseq=yseq[0])]
             logging.info(
                 "best hypo: "
-                + self.tokenizer.tokens2text(
-                    self.converter.ids2tokens(nbest_hyps[0].yseq[1:])
-                )
+                + "".join(self.converter.ids2tokens(nbest_hyps[0].yseq[1:]))
                 + "\n"
             )
         else:
@@ -667,7 +664,7 @@ def inference(
     quantize_modules: List[str],
     quantize_dtype: str,
     hugging_face_decoder: bool,
-    hugging_face_decoder_conf: Dict[str, Any],
+    hugging_face_decoder_max_length: int,
     time_sync: bool,
     multi_asr: bool,
 ):
@@ -720,7 +717,7 @@ def inference(
         quantize_modules=quantize_modules,
         quantize_dtype=quantize_dtype,
         hugging_face_decoder=hugging_face_decoder,
-        hugging_face_decoder_conf=hugging_face_decoder_conf,
+        hugging_face_decoder_max_length=hugging_face_decoder_max_length,
         time_sync=time_sync,
     )
     speech2text = Speech2Text.from_pretrained(
@@ -753,7 +750,7 @@ def inference(
 
             # N-best list of (text, token, token_int, hyp_object)
             try:
-                results = speech2text(str(keys), **batch)
+                results = speech2text(**batch)
             except TooShortUttError as e:
                 logging.warning(f"Utterance {keys} {e}")
                 hyp = Hypothesis(score=0.0, scores={}, states={}, yseq=[])
@@ -785,10 +782,6 @@ def inference(
 
             else:
                 # Normal ASR
-                encoder_interctc_res = None
-                if isinstance(results, tuple):
-                    results, encoder_interctc_res = results
-
                 for n, (text, token, token_int, hyp) in zip(
                     range(1, nbest + 1), results
                 ):
@@ -802,15 +795,6 @@ def inference(
 
                     if text is not None:
                         ibest_writer["text"][key] = text
-
-                # Write intermediate predictions to
-                # encoder_interctc_layer<layer_idx>.txt
-                ibest_writer = writer[f"1best_recog"]
-                if encoder_interctc_res is not None:
-                    for idx, text in encoder_interctc_res.items():
-                        ibest_writer[f"encoder_interctc_layer{idx}.txt"][
-                            key
-                        ] = " ".join(text)
 
 
 def get_parser():
@@ -906,14 +890,13 @@ def get_parser():
         "--enh_s2t_task",
         type=str2bool,
         default=False,
-        help="Whether we are using an enhancement and ASR joint model",
+        help="enhancement and asr joint model",
     )
     group.add_argument(
         "--multi_asr",
         type=str2bool,
         default=False,
-        help="Whether we are using a monolithic multi-speaker ASR model "
-        "(This flag should be False if a speech separation model is used before ASR)",
+        help="multi-speaker asr model",
     )
 
     group = parser.add_argument_group("Quantization related")
@@ -984,12 +967,7 @@ def get_parser():
     group.add_argument("--ngram_weight", type=float, default=0.9, help="ngram weight")
     group.add_argument("--streaming", type=str2bool, default=False)
     group.add_argument("--hugging_face_decoder", type=str2bool, default=False)
-    group.add_argument(
-        "--hugging_face_decoder_conf",
-        type=NestedDictAction,
-        default=dict(),
-        help="Custom kwargs for the HF .generate()",
-    )
+    group.add_argument("--hugging_face_decoder_max_length", type=int, default=256)
 
     group.add_argument(
         "--transducer_conf",

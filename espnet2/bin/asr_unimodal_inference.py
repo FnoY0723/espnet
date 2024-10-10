@@ -1,7 +1,7 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
 LastEditors: FnoY0723 fangying@westlake.edu.cn
-LastEditTime: 2024-09-03 22:30:38
+LastEditTime: 2024-09-30 14:38:50
 FilePath: /espnet/espnet2/bin/asr_unimodal_inference.py
 '''
 #!/usr/bin/env python3
@@ -305,7 +305,7 @@ class Speech2Text:
         self.enh_s2t_task = enh_s2t_task
         self.multi_asr = multi_asr
 
-        self.calculate_latency = True
+        self.calculate_latency = False
         self.draw = False
         self.image_dir = './inference_delay_comparison_0813/mamba_uma_la0'
         self.k=0

@@ -1,6 +1,6 @@
 '''
 Author: FnoY fangying@westlake.edu.cn
-LastEditTime: 2024-08-08 23:18:50
+LastEditTime: 2024-09-30 14:49:44
 FilePath: /espnet/espnet2/asr/unimodal_attention_model.py
 '''
 import logging
@@ -186,13 +186,13 @@ class UAMASRModel(AbsESPnetModel):
 
             self.decoder = decoder
 
-            if not hasattr(self.decoder, "interctc_use_conditioning"):
-                self.decoder.interctc_use_conditioning = False
+            # if not hasattr(self.decoder, "interctc_use_conditioning"):
+            #     self.decoder.interctc_use_conditioning = False
                 
-            if self.decoder.interctc_use_conditioning:
-                self.decoder.conditioning_layer = torch.nn.Linear(
-                    vocab_size, self.decoder.output_size()
-                )
+            # if self.decoder.interctc_use_conditioning:
+            #     self.decoder.conditioning_layer = torch.nn.Linear(
+            #         vocab_size, self.decoder.output_size()
+            #     )
 
             self.criterion_att = LabelSmoothingLoss(
                 size=vocab_size,
@@ -286,13 +286,17 @@ class UAMASRModel(AbsESPnetModel):
         # logging.info("uma_out_length: "+ (str(uma_out_lens)))
 
         # 2. Decoder
-        decoder_out, decoder_out_lens = self.decoder(uma_out, uma_out_lens, text, text_lengths, self.ctc)
-        # decoder_out, decoder_out_lens = self.decoder(uma_out, uma_out_lens, text, text_lengths, self.ctc, chunk_counts)
-        # print("decoder_out: ", decoder_out_lens)
-        intermediate_outs_dec = None
-        if isinstance(decoder_out, tuple):
-            intermediate_outs_dec = decoder_out[1]
-            decoder_out = decoder_out[0]
+        if self.decoder is not None:
+            decoder_out, decoder_out_lens = self.decoder(uma_out, uma_out_lens, text, text_lengths, self.ctc)
+            # decoder_out, decoder_out_lens = self.decoder(uma_out, uma_out_lens, text, text_lengths, self.ctc, chunk_counts)
+            # print("decoder_out: ", decoder_out_lens)
+            intermediate_outs_dec = None
+            if isinstance(decoder_out, tuple):
+                intermediate_outs_dec = decoder_out[1]
+                decoder_out = decoder_out[0]
+        else:
+            decoder_out=uma_out
+            decoder_out_lens=uma_out_lens
 
 
         # 1. CTC branch
